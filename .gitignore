@@ -1,0 +1,78 @@
+# Node dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime / process files
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Build output
+dist/
+build/
+out/
+.next/
+.nuxt/
+.serverless/
+.vercel/
+.cache/
+.parcel-cache/
+
+# Coverage
+coverage/
+.nyc_output/
+
+# TypeScript
+*.tsbuildinfo
+
+# Optional npm cache
+.npm/
+
+# Bundler / cache
+.esbuild/
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Environment variables
+.env
+.env.*.local
+.env.local
+.env.test
+.env.production
+
+# IDE / Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Yarn
+.yarn/*
+.yarnrc.yml
+.yarn/releases/
+.yarn/plugins/
+
+# Misc
+lib-cov/
+bower_components/
+*.tgz
+*.log.*
