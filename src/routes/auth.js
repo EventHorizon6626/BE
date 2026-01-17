@@ -36,8 +36,30 @@ function ctx(req, extra = {}) {
 }
 
 /** ---------- Helpers ---------- */
-const FRONTEND_ORIGIN =
-  ENV.frontendUrl || process.env.FRONTEND_URL || "http://localhost:3000";
+// Parse allowed frontend URLs from env (comma-separated)
+const ALLOWED_FRONTEND_ORIGINS = (
+  process.env.FRONTEND_URL || 
+  ENV.frontendUrl || 
+  "http://localhost:3000"
+)
+  .split(",")
+  .map((url) => url.trim())
+  .filter(Boolean);
+
+// Get the appropriate frontend origin based on referer/origin
+function getFrontendOrigin(req) {
+  const referer = req.get("referer") || req.get("origin") || "";
+  
+  // Check if referer matches any allowed origin
+  for (const allowedOrigin of ALLOWED_FRONTEND_ORIGINS) {
+    if (referer.startsWith(allowedOrigin)) {
+      return allowedOrigin;
+    }
+  }
+  
+  // Default to first allowed origin
+  return ALLOWED_FRONTEND_ORIGINS[0];
+}
 
 // chỉ nhận internal path, chống open-redirect
 function normalizePath(p, fallback = "/") {
@@ -390,7 +412,8 @@ authRouter.get("/google/callback", rateLimiter.light, async (req, res) => {
     // Redirect về FE với token trong URL (hoặc sử dụng postMessage pattern)
     // Option 1: Token in URL fragment (client-side only, not sent to server)
     const nextPath = normalizePath(saved.next, "/");
-    const redirectTo = new URL(nextPath, FRONTEND_ORIGIN);
+    const frontendOrigin = getFrontendOrigin(req);
+    const redirectTo = new URL(nextPath, frontendOrigin);
     redirectTo.hash = `token=${encodeURIComponent(token)}`;
 
     log("INFO", "google.callback.success", {
