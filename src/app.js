@@ -4,6 +4,7 @@ import helmet from "helmet";
 import cors from "cors";
 import { ENV, ALLOWED_ORIGINS } from "./config/env.js";
 import { authRouter } from "./routes/auth.js";
+import { aiRouter } from "./routes/ai.js";
 
 export const app = express();
 
@@ -50,6 +51,7 @@ app.use(
 
 // CHỈ mount router — không mount /logout ở app-level nữa
 app.use("/api/auth", authRouter);
+app.use("/api/ai", aiRouter);
 
 // Health
 app.get("/healthz", (req, res) => res.json({ ok: true, ts: Date.now() }));
