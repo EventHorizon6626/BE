@@ -55,7 +55,10 @@ aiRouter.post("/portfolio/analyze", requireAuth, async (req, res) => {
     const data = await aiResponse.json();
     console.log(`[AI Proxy] Portfolio analysis complete`);
 
-    return res.json(data);
+    // Wrap in 'result' object for FE compatibility
+    return res.json({
+      result: data.stage1_output
+    });
   } catch (error) {
     console.error("[AI Proxy] Error:", error);
 
@@ -130,9 +133,12 @@ aiRouter.post("/chart", requireAuth, async (req, res) => {
     const data = await aiResponse.json();
     console.log(`[AI Proxy] Chart data fetched successfully`);
 
-    // Extract only chart_data from Stage 1 output
-    const chartData = data?.stage1_output?.chart_data || {};
-    return res.json(chartData);
+    // Wrap in 'result' object for FE compatibility
+    return res.json({
+      result: {
+        chart_data: data?.stage1_output?.chart_data || {}
+      }
+    });
   } catch (error) {
     console.error("[AI Proxy] Chart error:", error);
 
