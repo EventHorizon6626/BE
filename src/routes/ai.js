@@ -4,12 +4,12 @@ import { requireAuth } from "../middleware/requireAuth.js";
 
 export const aiRouter = express.Router();
 
-// AI Service URL (runs on same VPS, localhost)
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:5000";
+// AI Service URL (Event-Horizon-AI runs on port 8001)
+const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:8001";
 
 /**
  * Proxy endpoint for portfolio analysis
- * Forwards requests to the AI service running on localhost:5000
+ * Forwards requests to Event-Horizon-AI service (Stage 1 data pipeline)
  */
 aiRouter.post("/portfolio/analyze", requireAuth, async (req, res) => {
   try {
@@ -25,14 +25,18 @@ aiRouter.post("/portfolio/analyze", requireAuth, async (req, res) => {
 
     console.log(`[AI Proxy] Analyzing portfolio with ${stocks.length} stocks:`, stocks);
 
-    // Forward request to AI service
-    const aiResponse = await fetch(`${AI_SERVICE_URL}/api/portfolio/analyze`, {
+    // Forward request to Event-Horizon-AI service
+    // Note: AI expects "portfolio" key, not "stocks"
+    const aiResponse = await fetch(`${AI_SERVICE_URL}/api/v1/analyze-portfolio`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: JSON.stringify({ stocks }),
+      body: JSON.stringify({
+        portfolio: stocks,
+        portfolio_id: `portfolio_${Date.now()}`
+      }),
       // 60 second timeout for AI processing
       signal: AbortSignal.timeout(60000),
     });
@@ -81,7 +85,7 @@ aiRouter.post("/portfolio/analyze", requireAuth, async (req, res) => {
 
 /**
  * Proxy endpoint for stock chart data
- * Forwards requests to the AI service for candlestick/OHLCV data
+ * Requests only candlestick data from Event-Horizon-AI
  */
 aiRouter.post("/chart", requireAuth, async (req, res) => {
   try {
@@ -97,14 +101,18 @@ aiRouter.post("/chart", requireAuth, async (req, res) => {
 
     console.log(`[AI Proxy] Fetching chart data for ${stocks.length} stocks:`, stocks);
 
-    // Forward request to AI service
-    const aiResponse = await fetch(`${AI_SERVICE_URL}/api/chart`, {
+    // Request only candlestick agent for faster response
+    const aiResponse = await fetch(`${AI_SERVICE_URL}/api/v1/analyze-portfolio`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: JSON.stringify({ stocks }),
+      body: JSON.stringify({
+        portfolio: stocks,
+        enabled_agents: ["candlestick"],
+        portfolio_id: `chart_${Date.now()}`
+      }),
       signal: AbortSignal.timeout(30000), // 30 second timeout
     });
 
@@ -122,7 +130,9 @@ aiRouter.post("/chart", requireAuth, async (req, res) => {
     const data = await aiResponse.json();
     console.log(`[AI Proxy] Chart data fetched successfully`);
 
-    return res.json(data);
+    // Extract only chart_data from Stage 1 output
+    const chartData = data?.stage1_output?.chart_data || {};
+    return res.json(chartData);
   } catch (error) {
     console.error("[AI Proxy] Chart error:", error);
 
