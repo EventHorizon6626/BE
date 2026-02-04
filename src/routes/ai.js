@@ -163,6 +163,105 @@ aiRouter.post("/chart", requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * Individual Agent Proxy Endpoints
+ * Forward requests to specific agents for pipeline builder
+ */
+
+// Generic agent proxy handler
+async function proxyAgentRequest(agentName, req, res) {
+  try {
+    const { stocks, timeframe, period, days, indicators } = req.body;
+
+    if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
+      return res.status(400).json({
+        error: "Invalid request",
+        message: "stocks array is required and must not be empty",
+      });
+    }
+
+    console.log(`[AI Proxy] Running ${agentName} agent for ${stocks.length} stocks`);
+
+    const aiResponse = await fetch(`${AI_SERVICE_URL}/agents/${agentName}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        stocks,
+        timeframe: timeframe || "1d",
+        period: period || "30d",
+        days: days || 7,
+        indicators: indicators || ["SMA", "RSI", "MACD"],
+      }),
+      signal: AbortSignal.timeout(60000),
+    });
+
+    if (!aiResponse.ok) {
+      const errorText = await aiResponse.text();
+      console.error(`[AI Proxy] ${agentName} agent error ${aiResponse.status}:`, errorText);
+
+      return res.status(aiResponse.status).json({
+        error: "AI service error",
+        message: errorText || `Failed to run ${agentName} agent`,
+        status: aiResponse.status,
+      });
+    }
+
+    const data = await aiResponse.json();
+    console.log(`[AI Proxy] ${agentName} agent completed successfully`);
+
+    return res.json(data);
+  } catch (error) {
+    console.error(`[AI Proxy] ${agentName} error:`, error);
+
+    if (error.name === "TimeoutError" || error.name === "AbortError") {
+      return res.status(504).json({
+        error: "Request timeout",
+        message: `${agentName} agent took too long to respond`,
+      });
+    }
+
+    if (error.cause?.code === "ECONNREFUSED") {
+      return res.status(503).json({
+        error: "Service unavailable",
+        message: "AI service is not responding",
+      });
+    }
+
+    return res.status(500).json({
+      error: "Internal server error",
+      message: error.message || `Failed to run ${agentName} agent`,
+    });
+  }
+}
+
+// Candlestick Agent
+aiRouter.post("/agents/candlestick", requireAuth, (req, res) =>
+  proxyAgentRequest("candlestick", req, res)
+);
+
+// Earnings Agent
+aiRouter.post("/agents/earnings", requireAuth, (req, res) =>
+  proxyAgentRequest("earnings", req, res)
+);
+
+// News Agent
+aiRouter.post("/agents/news", requireAuth, (req, res) =>
+  proxyAgentRequest("news", req, res)
+);
+
+// Technical Analysis Agent
+aiRouter.post("/agents/technical", requireAuth, (req, res) =>
+  proxyAgentRequest("technical", req, res)
+);
+
+// Fundamentals Agent
+aiRouter.post("/agents/fundamentals", requireAuth, (req, res) =>
+  proxyAgentRequest("fundamentals", req, res)
+);
+
 // Health check for AI service
 aiRouter.get("/health", async (req, res) => {
   try {
