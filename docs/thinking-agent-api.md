@@ -192,6 +192,6 @@ try {
 
 ## See Also
 
-- [Agent Routes Documentation](./routes.md)
-- [Agent Model Documentation](./models.md)
-- [AI Service Integration](./ai-service.md)
+- [Related Endpoints](#related-endpoints) - Other AI agent endpoints
+- [Agent Model Schema](#agent-model-schema) - Thinking-related fields
+- [Environment Variables](#environment-variables) - Configuration options
