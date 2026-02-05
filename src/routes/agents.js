@@ -74,10 +74,7 @@ router.post("/", requireAuth, async (req, res) => {
       type,
       category,
       system,
-      stage,
       systemPrompt,
-      enableThinking,
-      maxIterations,
       config,
     } = req.body;
 
@@ -88,12 +85,7 @@ router.post("/", requireAuth, async (req, res) => {
       });
     }
 
-    if (!systemPrompt || !systemPrompt.trim()) {
-      return res.status(400).json({
-        success: false,
-        error: "System prompt is required",
-      });
-    }
+    // systemPrompt is optional - model has default ""
 
     const agent = new Agent({
       userId,
@@ -101,21 +93,10 @@ router.post("/", requireAuth, async (req, res) => {
       description: description || "",
       type: type || "custom_agent",
       category: category || "custom_analyzer",
-      system: system || "System 2",
-      stage: stage || "Team 1",
-      systemPrompt: systemPrompt.trim(),
-      enableThinking: enableThinking !== false, // Default to true
-      maxIterations: maxIterations || 5,
-      // Default LLM config - Google Gemini (hidden from user)
-      llmConfig: {
-        provider: "google",
-        deepThinkModel: "gemini-1.5-pro",
-        quickThinkModel: "gemini-2.0-flash",
-        temperature: 0.7,
-        maxTokens: 4000,
-      },
+      system: system || "data",
+      systemPrompt: systemPrompt ? systemPrompt.trim() : "",
       config: config || {},
-      status: "active",
+      isActive: true,
     });
 
     await agent.save();
