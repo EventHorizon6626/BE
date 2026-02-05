@@ -6,6 +6,7 @@ import { authRouter } from "./routes/auth.js";
 import { aiRouter } from "./routes/ai.js";
 import horizonRoutes from "./routes/horizons.js";
 import nodeRoutes from "./routes/nodes.js";
+import agentRoutes from "./routes/agents.js";
 import { requestLogger } from "./middleware/requestLogger.js";
 
 export const app = express();
@@ -55,5 +56,6 @@ app.use("/api/auth", authRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/horizons", horizonRoutes);
 app.use("/api/nodes", nodeRoutes);
+app.use("/api/agents", agentRoutes);
 
 app.get("/healthz", (req, res) => res.json({ ok: true, ts: Date.now() }));
