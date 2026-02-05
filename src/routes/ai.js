@@ -171,7 +171,7 @@ aiRouter.post("/chart", requireAuth, async (req, res) => {
 // Generic agent proxy handler
 async function proxyAgentRequest(agentName, req, res) {
   try {
-    const { stocks, timeframe, period, days, indicators } = req.body;
+    const { stocks, timeframe, period, days, indicators, data } = req.body;
 
     if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
       return res.status(400).json({
@@ -194,6 +194,7 @@ async function proxyAgentRequest(agentName, req, res) {
         period: period || "30d",
         days: days || 7,
         indicators: indicators || ["SMA", "RSI", "MACD"],
+        data: data || null, // For System 2 agents
       }),
       signal: AbortSignal.timeout(60000),
     });
@@ -260,6 +261,54 @@ aiRouter.post("/agents/technical", requireAuth, (req, res) =>
 // Fundamentals Agent
 aiRouter.post("/agents/fundamentals", requireAuth, (req, res) =>
   proxyAgentRequest("fundamentals", req, res)
+);
+
+// ===== System 2: Team 1 Analyst Agents =====
+
+aiRouter.post("/agents/fundamentals-analyst", requireAuth, (req, res) =>
+  proxyAgentRequest("fundamentals-analyst", req, res)
+);
+
+aiRouter.post("/agents/sentiment-analyst", requireAuth, (req, res) =>
+  proxyAgentRequest("sentiment-analyst", req, res)
+);
+
+aiRouter.post("/agents/news-analyst", requireAuth, (req, res) =>
+  proxyAgentRequest("news-analyst", req, res)
+);
+
+aiRouter.post("/agents/technical-analyst", requireAuth, (req, res) =>
+  proxyAgentRequest("technical-analyst", req, res)
+);
+
+// ===== System 2: Team 2 Researcher Agents =====
+
+aiRouter.post("/agents/bull-researcher", requireAuth, (req, res) =>
+  proxyAgentRequest("bull-researcher", req, res)
+);
+
+aiRouter.post("/agents/bear-researcher", requireAuth, (req, res) =>
+  proxyAgentRequest("bear-researcher", req, res)
+);
+
+aiRouter.post("/agents/research-manager", requireAuth, (req, res) =>
+  proxyAgentRequest("research-manager", req, res)
+);
+
+// ===== System 2: Team 3 Portfolio =====
+
+aiRouter.post("/agents/portfolio-manager", requireAuth, (req, res) =>
+  proxyAgentRequest("portfolio-manager", req, res)
+);
+
+// ===== System 2: Team 4 Risk & Execution =====
+
+aiRouter.post("/agents/risk-manager", requireAuth, (req, res) =>
+  proxyAgentRequest("risk-manager", req, res)
+);
+
+aiRouter.post("/agents/trader", requireAuth, (req, res) =>
+  proxyAgentRequest("trader", req, res)
 );
 
 // Health check for AI service
