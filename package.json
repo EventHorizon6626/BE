@@ -6,7 +6,13 @@
   "main": "index.js",
   "scripts": {
     "dev": "npx nodemon --env-file=.env src/server.js",
-    "start": "NODE_ENV=production node src/server.js"
+    "start": "NODE_ENV=production node src/server.js",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "src/**/*.js": "eslint"
   },
   "repository": {
     "type": "git",
@@ -31,5 +37,10 @@
     "ulid": "^2.3.0",
     "uuid": "^13.0.0",
     "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7"
   }
 }
