@@ -6,43 +6,55 @@ const AgentSchema = new mongoose.Schema(
     // Owner
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
 
+    // Horizon context (optional - agents can be global or horizon-specific)
+    horizonId: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: "Horizon", 
+      required: false,
+      index: true 
+    },
+
+    // Team context (for team agents)
+    teamId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Team",
+      required: false,
+      index: true
+    },
+
     // Basic Info
     name: { type: String, required: true, trim: true },
     description: { type: String, default: "" },
-    type: { type: String, required: true }, // e.g., "custom_analyst", "custom_researcher"
+    type: { type: String, required: true }, // e.g., "custom_analyst", "custom_researcher", "candlestick", "earnings"
 
     // Classification
     category: {
       type: String,
-      enum: ["strategy_agent", "risk_manager", "custom_analyzer", "data_retriever", "news_agent", "technical_agent"],
+      enum: ["strategy_agent", "risk_manager", "custom_analyzer", "data_retriever", "news_agent", "technical_agent", "financial_metrics", "researcher"],
       default: "custom_analyzer"
     },
     system: {
       type: String,
-      enum: ["System 1", "System 2"],
-      default: "System 2"
+      enum: ["data", "team"],
+      default: "data"
     },
-    stage: { type: String, default: "Team 1" }, // Team 1-4 for System 2, Stage 1-3 for System 1
 
-    // LLM Configuration (TradingAgents dual-LLM architecture)
-    llmConfig: {
-      provider: {
-        type: String,
-        enum: ["google", "openai", "anthropic", "ollama", "xai", "openrouter"],
-        default: "google"
-      },
-      deepThinkModel: { type: String, default: "gemini-1.5-pro" },
-      quickThinkModel: { type: String, default: "gemini-2.0-flash" },
-      temperature: { type: Number, default: 0.7, min: 0, max: 2 },
-      maxTokens: { type: Number, default: 4000 },
+    // UI Properties
+    icon: { type: String, default: "MdSmartToy" },
+    color: { type: String, default: "blue" },
+    isBuiltin: { type: Boolean, default: false },
+
+    // LLM Configuration
+    model: { 
+      type: String, 
+      default: "gpt-4",
+      enum: ["gpt-4", "gpt-4-turbo", "claude-3-opus", "claude-3-sonnet"]
     },
+    temperature: { type: Number, default: 0.7, min: 0, max: 2 },
+    maxTokens: { type: Number, default: 4000 },
 
     // The core instruction for the agent
-    systemPrompt: { type: String, required: true },
-
-    // Thinking Mode Configuration (ReAct-style iterative reasoning)
-    enableThinking: { type: Boolean, default: true },
-    maxIterations: { type: Number, default: 5, min: 1, max: 10 },
+    systemPrompt: { type: String, default: "" },
 
     // Agent-specific configuration
     config: {
@@ -50,11 +62,10 @@ const AgentSchema = new mongoose.Schema(
       default: {}
     },
 
-    // Status
-    status: {
-      type: String,
-      enum: ["active", "inactive", "draft", "deleted"],
-      default: "active"
+    // Soft delete
+    isActive: {
+      type: Boolean,
+      default: true
     },
 
     // Usage stats
@@ -67,9 +78,11 @@ const AgentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Index for efficient queries
-AgentSchema.index({ userId: 1, status: 1 });
-AgentSchema.index({ isPublic: 1, status: 1 });
+// Indexes for efficient queries
+AgentSchema.index({ userId: 1, horizonId: 1 });
+AgentSchema.index({ userId: 1, isActive: 1 });
+AgentSchema.index({ horizonId: 1, system: 1, isActive: 1 });
+AgentSchema.index({ teamId: 1, isActive: 1 });
 
 // Transform for JSON response
 AgentSchema.set("toJSON", {
@@ -80,5 +93,58 @@ AgentSchema.set("toJSON", {
     return ret;
   },
 });
+
+// Static methods
+AgentSchema.statics.findByHorizon = async function(horizonId, options = {}) {
+  const { system, includeInactive = false } = options;
+
+  const query = {
+    horizonId,
+    ...(includeInactive ? {} : { isActive: true }),
+    ...(system ? { system } : {}),
+  };
+
+  const agents = await this.find(query).sort({ createdAt: -1 });
+  return agents;
+};
+
+AgentSchema.statics.findByTeam = async function(teamId, options = {}) {
+  const { includeInactive = false } = options;
+
+  const query = {
+    teamId,
+    ...(includeInactive ? {} : { isActive: true }),
+  };
+
+  const agents = await this.find(query).sort({ createdAt: -1 });
+  return agents;
+};
+
+AgentSchema.statics.findByUser = async function(userId, options = {}) {
+  const { page = 1, limit = 20, includeInactive = false } = options;
+
+  const query = {
+    userId,
+    ...(includeInactive ? {} : { isActive: true }),
+  };
+
+  const [agents, total] = await Promise.all([
+    this.find(query)
+      .sort({ updatedAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    this.countDocuments(query),
+  ]);
+
+  return {
+    agents,
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit),
+    },
+  };
+};
 
 export const Agent = mongoose.models.Agent || mongoose.model("Agent", AgentSchema);

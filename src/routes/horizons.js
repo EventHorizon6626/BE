@@ -2,6 +2,9 @@ import express from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { Horizon } from "../models/horizon.js";
 import { Node } from "../models/node.js";
+import { Portfolio } from "../models/portfolio.js";
+import { Agent } from "../models/agent.js";
+import { Team } from "../models/team.js";
 
 const router = express.Router();
 
@@ -57,9 +60,66 @@ router.get("/:id", requireAuth, async (req, res) => {
       });
     }
 
+    const portfolios = await Portfolio.findByHorizon(horizon._id);
+
+    const dataAgents = await Agent.findByHorizon(horizon._id, {
+      system: "data",
+    });
+    const teamAgents = await Agent.findByHorizon(horizon._id, {
+      system: "team",
+    });
+
+    const teams = await Team.findByHorizon(horizon._id);
+
+    const teamsWithAgents = teams.map((team) => {
+      const teamJSON = team.toJSON();
+      teamJSON.agents = teamAgents
+        .filter((agent) => String(agent.teamId) === String(team._id))
+        .map((agent) => agent.toJSON());
+      return teamJSON;
+    });
+
+    const horizonData = horizon.toJSON();
+    horizonData.portfolios = portfolios.map((p) => ({
+      id: String(p._id),
+      name: p.name,
+      description: p.description,
+      stocks: p.stocks,
+      createdAt: p.createdAt,
+    }));
+
+    horizonData.availableAgents = dataAgents.map((agent) => ({
+      id: String(agent._id),
+      name: agent.name,
+      type: agent.type,
+      system: agent.system,
+      icon: agent.icon,
+      color: agent.color,
+      isBuiltin: agent.isBuiltin,
+      description: agent.description,
+      model: agent.model,
+    }));
+
+    horizonData.availableTeams = teamsWithAgents;
+
+    horizonData.customAgents = [...dataAgents, ...teamAgents]
+      .filter((agent) => !agent.isBuiltin)
+      .map((agent) => ({
+        id: String(agent._id),
+        name: agent.name,
+        type: agent.type,
+        system: agent.system,
+        teamId: agent.teamId ? String(agent.teamId) : null,
+        icon: agent.icon,
+        color: agent.color,
+        isBuiltin: agent.isBuiltin,
+        description: agent.description,
+        model: agent.model,
+      }));
+
     res.json({
       success: true,
-      data: horizon.toJSON(),
+      data: horizonData,
     });
   } catch (error) {
     console.error("Error fetching horizon:", error);
