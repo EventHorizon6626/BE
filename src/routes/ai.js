@@ -311,6 +311,88 @@ aiRouter.post("/agents/trader", requireAuth, (req, res) =>
   proxyAgentRequest("trader", req, res)
 );
 
+// ===== Thinking Agent Endpoint =====
+
+/**
+ * Proxy thinking agent requests to Event-Horizon-AI
+ * Supports iterative ReAct-style reasoning with tool calling
+ */
+aiRouter.post("/agents/think", requireAuth, async (req, res) => {
+  try {
+    const { stocks, input_data, system_prompt, max_iterations, available_tools } = req.body;
+
+    if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
+      return res.status(400).json({
+        error: "Invalid request",
+        message: "stocks array is required and must not be empty",
+      });
+    }
+
+    if (!system_prompt) {
+      return res.status(400).json({
+        error: "Invalid request",
+        message: "system_prompt is required",
+      });
+    }
+
+    console.log(`[AI Proxy] Running thinking agent for ${stocks.length} stocks with max ${max_iterations || 5} iterations`);
+
+    const aiResponse = await fetch(`${AI_SERVICE_URL}/agents/think`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        stocks,
+        input_data: input_data || null,
+        system_prompt,
+        max_iterations: max_iterations || 5,
+        available_tools: available_tools || ["candlestick", "earnings", "news", "technical", "fundamentals"],
+      }),
+      // Longer timeout for thinking agents (up to 3 minutes)
+      signal: AbortSignal.timeout(180000),
+    });
+
+    if (!aiResponse.ok) {
+      const errorText = await aiResponse.text();
+      console.error(`[AI Proxy] Thinking agent error ${aiResponse.status}:`, errorText);
+
+      return res.status(aiResponse.status).json({
+        error: "AI service error",
+        message: errorText || "Failed to run thinking agent",
+        status: aiResponse.status,
+      });
+    }
+
+    const responseData = await aiResponse.json();
+    console.log(`[AI Proxy] Thinking agent completed with status: ${responseData.status}, iterations: ${responseData.iterations_used}`);
+
+    return res.json(responseData);
+  } catch (error) {
+    console.error("[AI Proxy] Thinking agent error:", error);
+
+    if (error.name === "TimeoutError" || error.name === "AbortError") {
+      return res.status(504).json({
+        error: "Request timeout",
+        message: "Thinking agent took too long to respond. Try reducing max iterations.",
+      });
+    }
+
+    if (error.cause?.code === "ECONNREFUSED") {
+      return res.status(503).json({
+        error: "Service unavailable",
+        message: "AI service is not responding",
+      });
+    }
+
+    return res.status(500).json({
+      error: "Internal server error",
+      message: error.message || "Failed to run thinking agent",
+    });
+  }
+});
+
 // Health check for AI service
 aiRouter.get("/health", async (req, res) => {
   try {
