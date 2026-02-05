@@ -6,6 +6,7 @@ import { authRouter } from "./routes/auth.js";
 import { aiRouter } from "./routes/ai.js";
 import horizonRoutes from "./routes/horizons.js";
 import nodeRoutes from "./routes/nodes.js";
+import { requestLogger } from "./middleware/requestLogger.js";
 
 export const app = express();
 
@@ -36,6 +37,9 @@ app.use(
 );
 
 app.use(express.json({ limit: "1mb" }));
+
+// Log all API requests
+app.use(requestLogger);
 
 app.use(
   cors({

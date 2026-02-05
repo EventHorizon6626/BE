@@ -210,10 +210,10 @@ async function proxyAgentRequest(agentName, req, res) {
       });
     }
 
-    const data = await aiResponse.json();
+    const Aidata = await aiResponse.json();
     console.log(`[AI Proxy] ${agentName} agent completed successfully`);
 
-    return res.json(data);
+    return res.json(Aidata);
   } catch (error) {
     console.error(`[AI Proxy] ${agentName} error:`, error);
 
