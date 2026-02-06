@@ -239,7 +239,7 @@ router.get("/by-agent/:agentNodeId", requireAuth, async (req, res) => {
       horizonId,
       type: "outputNode",
       parentId: agentNodeId,
-      isActive: true,
+      // isActive: true,
     })
       .sort({ createdAt: -1 }) // Newest first
       .lean();

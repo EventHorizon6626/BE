@@ -95,6 +95,7 @@ router.get("/:id", requireAuth, async (req, res) => {
       position: node.position,
       data: node.data,
       selected: node.selected || false,
+      parentId: node.parentId ? String(node.parentId) : null,
     }));
     horizonData.portfolios = portfolios.map((p) => ({
       id: String(p._id),
