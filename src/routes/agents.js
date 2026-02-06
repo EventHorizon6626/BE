@@ -12,10 +12,10 @@ router.post("/generate-prompt", requireAuth, async (req, res) => {
   try {
     const { name, description, team, category } = req.body;
 
-    if (!name || !description) {
+    if (!name) {
       return res.status(400).json({
         success: false,
-        error: "Name and description are required",
+        error: "Name is required",
       });
     }
 
@@ -30,7 +30,7 @@ router.post("/generate-prompt", requireAuth, async (req, res) => {
         },
         body: JSON.stringify({
           name,
-          description,
+          description: description || "",
           team: team || "Team 1",
           category: category || "strategy_agent",
         }),
@@ -43,6 +43,11 @@ router.post("/generate-prompt", requireAuth, async (req, res) => {
     }
 
     const data = await response.json();
+
+    // Validate that system prompt was generated
+    if (!data.system_prompt || data.system_prompt.trim() === "") {
+      throw new Error("AI service returned empty system prompt");
+    }
 
     res.json({
       success: true,
@@ -208,6 +213,15 @@ router.post("/", requireAuth, async (req, res) => {
       });
     }
 
+    // Validate system prompt for custom agents
+    const agentType = type || "custom_agent";
+    if (agentType === "custom_agent" && (!systemPrompt || !systemPrompt.trim())) {
+      return res.status(400).json({
+        success: false,
+        error: "System prompt is required for custom agents",
+      });
+    }
+
     // Verify horizon ownership when horizonId is provided
     if (horizonId) {
       const horizon = await Horizon.findOne({
@@ -299,7 +313,19 @@ router.put("/:id", requireAuth, async (req, res) => {
     if (category !== undefined) agent.category = category;
     if (system !== undefined) agent.system = system;
     if (stage !== undefined) agent.stage = stage;
-    if (systemPrompt !== undefined) agent.systemPrompt = systemPrompt;
+
+    // Validate system prompt for custom agents
+    if (systemPrompt !== undefined) {
+      const agentType = type !== undefined ? type : agent.type;
+      if (agentType === "custom_agent" && (!systemPrompt || !systemPrompt.trim())) {
+        return res.status(400).json({
+          success: false,
+          error: "System prompt cannot be empty for custom agents",
+        });
+      }
+      agent.systemPrompt = systemPrompt;
+    }
+
     if (enableThinking !== undefined) agent.enableThinking = enableThinking;
     if (maxIterations !== undefined) agent.maxIterations = maxIterations;
     if (config !== undefined) agent.config = config;
