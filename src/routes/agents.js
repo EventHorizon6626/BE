@@ -205,30 +205,25 @@ router.post("/", requireAuth, async (req, res) => {
       });
     }
 
-    if (!horizonId) {
-      return res.status(400).json({
-        success: false,
-        error: "Horizon ID is required",
+    // Verify horizon ownership when horizonId is provided
+    if (horizonId) {
+      const horizon = await Horizon.findOne({
+        _id: horizonId,
+        userId,
+        isActive: true,
       });
-    }
 
-    // Verify horizon ownership
-    const horizon = await Horizon.findOne({
-      _id: horizonId,
-      userId,
-      isActive: true,
-    });
-
-    if (!horizon) {
-      return res.status(404).json({
-        success: false,
-        error: "Horizon not found or access denied",
-      });
+      if (!horizon) {
+        return res.status(404).json({
+          success: false,
+          error: "Horizon not found or access denied",
+        });
+      }
     }
 
     const agent = new Agent({
       userId,
-      horizonId,
+      horizonId: horizonId || undefined,
       teamId: teamId && mongoose.Types.ObjectId.isValid(teamId) ? teamId : undefined,
       name: name.trim(),
       description: description || "",

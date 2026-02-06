@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "npx nodemon --env-file=.env src/server.js",
     "start": "NODE_ENV=production node src/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "prepare": "husky"
@@ -41,6 +43,9 @@
   "devDependencies": {
     "eslint": "^9.39.2",
     "husky": "^9.1.7",
-    "lint-staged": "^16.2.7"
+    "lint-staged": "^16.2.7",
+    "mongodb-memory-server": "^10.0.0",
+    "supertest": "^7.0.0",
+    "vitest": "^3.0.0"
   }
 }
