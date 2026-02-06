@@ -61,6 +61,9 @@ const HorizonSchema = new mongoose.Schema(
         isBuiltin: { type: Boolean, default: false },
         description: String,
         model: String,
+        systemPrompt: String,
+        enableThinking: Boolean,
+        maxIterations: Number,
       },
     ],
 
@@ -85,6 +88,9 @@ const HorizonSchema = new mongoose.Schema(
         isBuiltin: { type: Boolean, default: false },
         description: String,
         model: String,
+        systemPrompt: String,
+        enableThinking: Boolean,
+        maxIterations: Number,
       },
     ],
 
