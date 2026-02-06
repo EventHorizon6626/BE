@@ -213,14 +213,8 @@ router.post("/", requireAuth, async (req, res) => {
       });
     }
 
-    // Validate system prompt for custom agents
-    const agentType = type || "custom_agent";
-    if (agentType === "custom_agent" && (!systemPrompt || !systemPrompt.trim())) {
-      return res.status(400).json({
-        success: false,
-        error: "System prompt is required for custom agents",
-      });
-    }
+    // System prompt is now optional - frontend will auto-generate if needed
+    // No validation required here
 
     // Verify horizon ownership when horizonId is provided
     if (horizonId) {
@@ -314,15 +308,8 @@ router.put("/:id", requireAuth, async (req, res) => {
     if (system !== undefined) agent.system = system;
     if (stage !== undefined) agent.stage = stage;
 
-    // Validate system prompt for custom agents
+    // System prompt is optional - can be auto-generated
     if (systemPrompt !== undefined) {
-      const agentType = type !== undefined ? type : agent.type;
-      if (agentType === "custom_agent" && (!systemPrompt || !systemPrompt.trim())) {
-        return res.status(400).json({
-          success: false,
-          error: "System prompt cannot be empty for custom agents",
-        });
-      }
       agent.systemPrompt = systemPrompt;
     }
 
