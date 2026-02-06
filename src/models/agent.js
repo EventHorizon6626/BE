@@ -30,7 +30,7 @@ const AgentSchema = new mongoose.Schema(
     // Classification
     category: {
       type: String,
-      enum: ["strategy_agent", "risk_manager", "custom_analyzer", "data_retriever", "news_agent", "technical_agent", "financial_metrics", "researcher"],
+      enum: ["strategy_agent", "risk_manager", "custom_analyzer", "data_retriever", "news_agent", "technical_agent", "financial_metrics", "api_connector", "researcher"],
       default: "custom_analyzer"
     },
     system: {
