@@ -263,6 +263,78 @@ aiRouter.post("/agents/fundamentals", requireAuth, (req, res) =>
   proxyAgentRequest("fundamentals", req, res)
 );
 
+// Custom Agent (user-provided system prompt)
+aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
+  try {
+    const { stocks, system_prompt, user_prompt } = req.body;
+
+    if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
+      return res.status(400).json({
+        error: "Invalid request",
+        message: "stocks array is required and must not be empty",
+      });
+    }
+
+    if (!system_prompt) {
+      return res.status(400).json({
+        error: "Invalid request",
+        message: "system_prompt is required for custom agents",
+      });
+    }
+
+    console.log(`[AI Proxy] Running custom agent for ${stocks.length} stocks`);
+
+    const aiResponse = await fetch(`${AI_SERVICE_URL}/agents/custom`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        stocks,
+        system_prompt,
+        user_prompt: user_prompt || null,
+      }),
+      signal: AbortSignal.timeout(60000),
+    });
+
+    if (!aiResponse.ok) {
+      const errorText = await aiResponse.text();
+      console.error(`[AI Proxy] Custom agent error ${aiResponse.status}:`, errorText);
+      return res.status(aiResponse.status).json({
+        error: "AI service error",
+        message: errorText || "Failed to run custom agent",
+        status: aiResponse.status,
+      });
+    }
+
+    const data = await aiResponse.json();
+    console.log(`[AI Proxy] Custom agent completed successfully`);
+    return res.json(data);
+  } catch (error) {
+    console.error("[AI Proxy] Custom agent error:", error);
+
+    if (error.name === "TimeoutError" || error.name === "AbortError") {
+      return res.status(504).json({
+        error: "Request timeout",
+        message: "Custom agent took too long to respond",
+      });
+    }
+
+    if (error.cause?.code === "ECONNREFUSED") {
+      return res.status(503).json({
+        error: "Service unavailable",
+        message: "AI service is not responding",
+      });
+    }
+
+    return res.status(500).json({
+      error: "Internal server error",
+      message: error.message || "Failed to run custom agent",
+    });
+  }
+});
+
 // ===== System 2: Team 1 Analyst Agents =====
 
 aiRouter.post("/agents/fundamentals-analyst", requireAuth, (req, res) =>

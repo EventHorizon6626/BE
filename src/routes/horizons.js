@@ -98,6 +98,9 @@ router.get("/:id", requireAuth, async (req, res) => {
       isBuiltin: agent.isBuiltin,
       description: agent.description,
       model: agent.model,
+      systemPrompt: agent.systemPrompt,
+      enableThinking: agent.enableThinking,
+      maxIterations: agent.maxIterations,
     }));
 
     horizonData.availableTeams = teamsWithAgents;
@@ -115,6 +118,9 @@ router.get("/:id", requireAuth, async (req, res) => {
         isBuiltin: agent.isBuiltin,
         description: agent.description,
         model: agent.model,
+        systemPrompt: agent.systemPrompt,
+        enableThinking: agent.enableThinking,
+        maxIterations: agent.maxIterations,
       }));
 
     res.json({
