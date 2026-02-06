@@ -7,7 +7,6 @@ import { aiRouter } from "./routes/ai.js";
 import horizonRoutes from "./routes/horizons.js";
 import nodeRoutes from "./routes/nodes.js";
 import agentRoutes from "./routes/agents.js";
-import horizonAgentRoutes from "./routes/horizonAgents.js";
 import portfolioRoutes from "./routes/portfolios.js";
 import teamRoutes from "./routes/teams.js";
 import { requestLogger } from "./middleware/requestLogger.js";
@@ -60,7 +59,6 @@ app.use("/api/horizons", horizonRoutes);
 app.use("/api/nodes", nodeRoutes);
 app.use("/api/portfolios", portfolioRoutes);
 app.use("/api/agents", agentRoutes);
-app.use("/api/horizon-agents", horizonAgentRoutes);
 app.use("/api/teams", teamRoutes);
 
 app.get("/healthz", (req, res) => res.json({ ok: true, ts: Date.now() }));
