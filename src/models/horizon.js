@@ -36,20 +36,6 @@ const HorizonSchema = new mongoose.Schema(
       },
     ],
 
-    edges: [
-      {
-        id: { type: String, required: true },
-        source: { type: String, required: true },
-        target: { type: String, required: true },
-        type: { type: String, default: "default" },
-        sourceHandle: String,
-        targetHandle: String,
-        animated: { type: Boolean, default: false },
-        label: String,
-        style: mongoose.Schema.Types.Mixed,
-      },
-    ],
-
     availableAgents: [
       {
         id: { type: String, required: true },
@@ -189,7 +175,8 @@ HorizonSchema.index({ name: "text", description: "text", tags: "text" });
 
 HorizonSchema.pre("save", function (next) {
   this.stats.nodeCount = this.nodes?.length || 0;
-  this.stats.edgeCount = this.edges?.length || 0;
+  // edgeCount will be calculated dynamically from nodes' parentId
+  this.stats.edgeCount = 0; // Will be computed on read
   this.stats.agentCount = this.availableAgents?.length || 0;
   this.stats.portfolioCount = this.portfolios?.length || 0;
 
@@ -224,6 +211,27 @@ HorizonSchema.methods = {
 };
 
 HorizonSchema.statics = {
+  buildEdgesFromNodes(nodes) {
+    const edges = [];
+    
+    nodes.forEach(node => {
+      // If node has a parent, create an edge from parent to this node
+      if (node.parentId) {
+        const edge = {
+          id: `edge-${node.parentId}-${node.id}`,
+          source: String(node.parentId),
+          target: String(node.id),
+          type: 'custom',
+          animated: false,
+          data: { output: node.data?.output || null },
+        };
+        edges.push(edge);
+      }
+    });
+    
+    return edges;
+  },
+
   async findAccessible(userId, options = {}) {
     const { page = 1, limit = 20, search = "", tags = [] } = options;
 

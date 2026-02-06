@@ -1,6 +1,7 @@
 // src/routes/ai.js
 import express from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { Node } from "../models/node.js";
 
 export const aiRouter = express.Router();
 
@@ -212,6 +213,71 @@ async function proxyAgentRequest(agentName, req, res) {
 
     const Aidata = await aiResponse.json();
     console.log(`[AI Proxy] ${agentName} agent completed successfully`);
+
+    // Auto-save outputNode to DB
+    try {
+      const { horizonId, agentNodeId, agentPosition } = req.body;
+      console.log(`[AI Proxy] Attempting to save outputNode for agentNodeId: ${agentNodeId}, horizonId: ${horizonId}`);
+      
+      if (horizonId && agentNodeId) {
+        const outputNode = new Node({
+          userId: req.auth.userId,
+          parentId: agentNodeId,
+          horizonId,
+          type: "outputNode",
+          position: agentPosition ? {
+            x: agentPosition.x + 350,
+            y: agentPosition.y
+          } : { x: 0, y: 0 },
+          data: {
+            result: Aidata,
+            agentName: agentName,
+            timestamp: new Date().toISOString(),
+            metadata: {
+              agentType: agentName,
+              symbols: stocks,
+              period: period || "30d",
+              timeframe: timeframe || "1d",
+            },
+          },
+        });
+
+        const outputNodeDoc = await outputNode.save();
+
+        const alloutputNodesOfCurrentAgent = await Node.find({
+          horizonId,
+          parentId: agentNodeId,
+          type: "outputNode",
+          isActive: true,
+        });
+        const oldOutputNodes = alloutputNodesOfCurrentAgent.filter(node => node._id.toString() !== outputNodeDoc._id.toString());
+        if (oldOutputNodes.length > 0) {
+          const oldOutputNodeIds = oldOutputNodes.map(node => node._id);
+          await Node.updateMany(
+            { _id: { $in: oldOutputNodeIds } },
+            { $set: { isActive: false } }
+          );
+          console.log(`[AI Proxy] Marked ${oldOutputNodeIds.length} old outputNodes as inactive for agentNodeId: ${agentNodeId}`);
+        }
+        const agentNode = await Node.findById({ _id: agentNodeId});
+        agentNode.children = [String(outputNodeDoc._id)];
+        await agentNode.save();
+
+        console.log(`[AI Proxy] Saved outputNode: ${outputNodeDoc._id}`);
+
+        // Return result + saved outputNode info
+        return res.json({
+          ...Aidata,
+          _outputNode: {
+            id: String(outputNodeDoc._id),
+            createdAt: outputNodeDoc.createdAt,
+          },
+        });
+      }
+    } catch (saveError) {
+      console.error(`[AI Proxy] Failed to save outputNode:`, saveError);
+      // Continue even if save fails - don't block agent response
+    }
 
     return res.json(Aidata);
   } catch (error) {

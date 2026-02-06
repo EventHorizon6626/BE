@@ -16,16 +16,10 @@ const NodeSchema = new mongoose.Schema(
       index: true,
     },
 
-    nodeId: {
-      type: String,
-      required: true,
-      index: true,
-    },
-
     type: {
       type: String,
       required: true,
-      enum: ["agentNode", "portfolioNode", "teamNode", "customNode"],
+      enum: ["agentNode", "portfolioNode", "teamNode", "customNode", "outputNode"],
       default: "agentNode",
     },
 
@@ -46,51 +40,22 @@ const NodeSchema = new mongoose.Schema(
       default: 0,
     },
 
-    path: {
-      type: String,
-      default: "",
-    },
-
     position: {
       x: { type: Number, required: true, default: 0 },
       y: { type: Number, required: true, default: 0 },
     },
 
     data: {
-      agent: {
-        id: String,
-        name: String,
-        type: String,
-        system: String,
-        teamId: String,
-        icon: String,
-        color: String,
-        isBuiltin: Boolean,
-        description: String,
-        model: String,
-      },
+      agent: mongoose.Schema.Types.Mixed,
+      portfolio: mongoose.Schema.Types.Mixed,
+      team: mongoose.Schema.Types.Mixed,
+      config: mongoose.Schema.Types.Mixed,
 
-      portfolio: {
-        id: String,
-        name: String,
-        stocks: [String],
-        createdAt: Date,
-      },
-
-      team: {
-        id: String,
-        name: String,
-        description: String,
-        agents: [mongoose.Schema.Types.Mixed],
-      },
-
-      config: {
-        name: String,
-        description: String,
-        model: String,
-        temperature: { type: Number, default: 0.7 },
-        maxTokens: { type: Number, default: 2000 },
-      },
+      // For outputNode
+      result: mongoose.Schema.Types.Mixed, // Agent output data
+      agentName: String,
+      timestamp: String,
+      metadata: mongoose.Schema.Types.Mixed, // symbols, period, etc.
 
       output: mongoose.Schema.Types.Mixed,
       lastRun: Date,
@@ -128,24 +93,24 @@ const NodeSchema = new mongoose.Schema(
 );
 
 NodeSchema.index({ userId: 1, horizonId: 1 });
-NodeSchema.index({ horizonId: 1, nodeId: 1 }, { unique: true });
 NodeSchema.index({ horizonId: 1, parentId: 1 });
-NodeSchema.index({ horizonId: 1, path: 1 });
+NodeSchema.index({ horizonId: 1, type: 1, createdAt: -1 }); // For sorting outputNodes by creation time
 
 NodeSchema.pre("save", async function (next) {
-  if (this.isModified("parentId")) {
+  // OutputNodes don't need parent or depth
+  if (this.type === "outputNode") {
+    return next();
+  }
+
+  // Build depth using parentId
+  if (this.isNew || this.isModified("parentId")) {
     if (this.parentId) {
-      const parent = await this.constructor.findOne({
-        horizonId: this.horizonId,
-        nodeId: this.parentId,
-      });
+      const parent = await this.constructor.findById(this.parentId);
       if (parent) {
         this.depth = parent.depth + 1;
-        this.path = parent.path ? `${parent.path}/${this.nodeId}` : this.nodeId;
       }
     } else {
       this.depth = 0;
-      this.path = this.nodeId;
     }
   }
 
@@ -154,7 +119,11 @@ NodeSchema.pre("save", async function (next) {
 
 NodeSchema.statics = {
   async getTree(horizonId) {
-    const nodes = await this.find({ horizonId, isActive: true }).sort({
+    const nodes = await this.find({ 
+      horizonId, 
+      isActive: true,
+      type: { $ne: "outputNode" } // Exclude outputNodes from tree
+    }).sort({
       depth: 1,
       executionOrder: 1,
     });
@@ -163,21 +132,49 @@ NodeSchema.statics = {
     const roots = [];
 
     nodes.forEach((node) => {
-      nodeMap[node.nodeId] = {
+      const nodeId = String(node._id);
+      nodeMap[nodeId] = {
         ...node.toJSON(),
         children: [],
       };
     });
 
     nodes.forEach((node) => {
-      if (node.parentId && nodeMap[node.parentId]) {
-        nodeMap[node.parentId].children.push(nodeMap[node.nodeId]);
+      const nodeId = String(node._id);
+      const parentId = String(node.parentId);
+      
+      if (node.parentId && nodeMap[parentId]) {
+        nodeMap[parentId].children.push(nodeMap[nodeId]);
       } else {
-        roots.push(nodeMap[node.nodeId]);
+        roots.push(nodeMap[nodeId]);
       }
     });
 
     return roots;
+  },
+  async findDescendants(nodeId, horizonId) {
+    const descendants = [];
+    const queue = [nodeId];
+
+    while (queue.length > 0) {
+      const currentNodeId = queue.shift();
+      
+      // Find all children of current node
+      const children = await this.find({
+        horizonId,
+        parentId: currentNodeId,
+        isActive: true,
+      }).select('_id');
+
+      // Add children to descendants and queue
+      children.forEach((child) => {
+        const childId = String(child._id);
+        descendants.push(childId);
+        queue.push(childId);
+      });
+    }
+
+    return descendants;
   },
 };
 

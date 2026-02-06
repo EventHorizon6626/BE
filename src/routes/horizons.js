@@ -60,6 +60,13 @@ router.get("/:id", requireAuth, async (req, res) => {
       });
     }
 
+    // Load nodes from Node collection instead of horizon.nodes
+    const nodes = await Node.find({
+      horizonId: horizon._id,
+      isActive: true,
+    }).sort({ createdAt: 1 });
+    console.log(`Loaded ${nodes.length} nodes for horizon ${horizon._id}`);
+
     const portfolios = await Portfolio.findByHorizon(horizon._id);
 
     const dataAgents = await Agent.findByHorizon(horizon._id, {
@@ -80,6 +87,15 @@ router.get("/:id", requireAuth, async (req, res) => {
     });
 
     const horizonData = horizon.toJSON();
+    
+    // Map nodes to React Flow format
+    horizonData.nodes = nodes.map((node) => ({
+      id: String(node._id),
+      type: node.type,
+      position: node.position,
+      data: node.data,
+      selected: node.selected || false,
+    }));
     horizonData.portfolios = portfolios.map((p) => ({
       id: String(p._id),
       name: p.name,
@@ -123,6 +139,10 @@ router.get("/:id", requireAuth, async (req, res) => {
         maxIterations: agent.maxIterations,
       }));
 
+    // Auto-generate edges from nodes based on parentId relationships
+    horizonData.edges = Horizon.buildEdgesFromNodes(nodes);
+    console.log(`Generated ${horizonData.edges.length} edges from node relationships`);
+
     res.json({
       success: true,
       data: horizonData,
@@ -143,7 +163,7 @@ router.post("/", requireAuth, async (req, res) => {
       name,
       description,
       nodes,
-      edges,
+      // edges are auto-generated, no need to accept from client
       availableAgents,
       availableTeams,
       customAgents,
@@ -164,7 +184,7 @@ router.post("/", requireAuth, async (req, res) => {
       name: name.trim(),
       description: description || "",
       nodes: nodes || [],
-      edges: edges || [],
+      // edges removed - will be auto-generated from nodes
       availableAgents: availableAgents || [],
       availableTeams: availableTeams || [],
       customAgents: customAgents || [],
@@ -214,7 +234,7 @@ router.put("/:id", requireAuth, async (req, res) => {
       name,
       description,
       nodes,
-      edges,
+      // edges are auto-generated, no need to accept from client
       availableAgents,
       availableTeams,
       customAgents,
@@ -226,8 +246,74 @@ router.put("/:id", requireAuth, async (req, res) => {
 
     if (name !== undefined) horizon.name = name.trim();
     if (description !== undefined) horizon.description = description;
-    if (nodes !== undefined) horizon.nodes = nodes;
-    if (edges !== undefined) horizon.edges = edges;
+    
+    // Handle nodes: sync to Node collection instead of horizon.nodes
+    if (nodes !== undefined) {
+      // Get ALL existing nodes (including outputNodes)
+      const existingNodes = await Node.find({
+        horizonId: horizon._id,
+        isActive: true,
+        // ✅ Include ALL node types including outputNodes
+      });
+      
+      const existingNodeIds = new Set(existingNodes.map((n) => String(n._id)));
+      const newNodeIds = new Set(nodes.map((n) => n.id));
+      
+      // Delete nodes that no longer exist in FE
+      const nodesToDelete = Array.from(existingNodeIds).filter(
+        (id) => !newNodeIds.has(id)
+      );
+      if (nodesToDelete.length > 0) {
+        await Node.updateMany(
+          { _id: { $in: nodesToDelete } },
+          { $set: { isActive: false } }
+        );
+      }
+      
+      // Upsert nodes (create or update)
+      const bulkOps = nodes.map((node) => ({
+        updateOne: {
+          filter: {
+            _id: node.id,
+            userId,
+            horizonId: horizon._id,
+          },
+          update: {
+            $set: {
+              type: node.type,
+              position: node.position,
+              data: node.data,
+              selected: node.selected || false,
+              isActive: true,
+            },
+          },
+          upsert: false, // Don't auto-create, node must exist
+        },
+      }));
+      
+      // Create new nodes that don't exist yet
+      const newNodes = nodes.filter((node) => !existingNodeIds.has(node.id));
+      if (newNodes.length > 0) {
+        await Node.insertMany(
+          newNodes.map((node) => ({
+            _id: node.id, // Use FE-provided ID
+            userId,
+            horizonId: horizon._id,
+            type: node.type,
+            position: node.position,
+            data: node.data,
+            selected: node.selected || false,
+            isActive: true,
+          }))
+        );
+      }
+      
+      if (bulkOps.length > 0) {
+        await Node.bulkWrite(bulkOps);
+      }
+    }
+    
+    // Note: edges are auto-generated from nodes' parentId, no need to save
     if (availableAgents !== undefined)
       horizon.availableAgents = availableAgents;
     if (availableTeams !== undefined) horizon.availableTeams = availableTeams;
@@ -236,6 +322,20 @@ router.put("/:id", requireAuth, async (req, res) => {
     if (tags !== undefined) horizon.tags = tags;
     if (viewport !== undefined) horizon.viewport = viewport;
     if (isPublic !== undefined) horizon.isPublic = isPublic;
+
+    // Update stats
+    const nodeCount = await Node.countDocuments({
+      horizonId: horizon._id,
+      isActive: true,
+    });
+    horizon.stats.nodeCount = nodeCount;
+    // edgeCount will be calculated dynamically from nodes' parentId relationships
+    const edgeCount = await Node.countDocuments({
+      horizonId: horizon._id,
+      isActive: true,
+      parentId: { $ne: null },
+    });
+    horizon.stats.edgeCount = edgeCount;
 
     await horizon.save();
 

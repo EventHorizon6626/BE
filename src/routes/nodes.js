@@ -10,7 +10,6 @@ router.post("/", requireAuth, async (req, res) => {
     const userId = req.auth.userId;
     const {
       horizonId,
-      nodeId,
       type,
       parentId,
       position,
@@ -18,10 +17,10 @@ router.post("/", requireAuth, async (req, res) => {
       executionOrder,
     } = req.body;
 
-    if (!horizonId || !nodeId || !type) {
+    if (!horizonId || !type) {
       return res.status(400).json({
         success: false,
-        error: "Missing required fields: horizonId, nodeId, type",
+        error: "Missing required fields: horizonId, type",
       });
     }
 
@@ -44,18 +43,9 @@ router.post("/", requireAuth, async (req, res) => {
       });
     }
 
-    const existing = await Node.findOne({ horizonId, nodeId });
-    if (existing) {
-      return res.status(400).json({
-        success: false,
-        error: "Node with this nodeId already exists in this horizon",
-      });
-    }
-
     const node = new Node({
       userId,
       horizonId,
-      nodeId,
       type,
       parentId: parentId || null,
       position: position || { x: 0, y: 0 },
@@ -66,9 +56,9 @@ router.post("/", requireAuth, async (req, res) => {
     await node.save();
 
     if (parentId) {
-      await Node.findOneAndUpdate(
-        { horizonId, nodeId: parentId },
-        { $addToSet: { children: nodeId } }
+      await Node.findByIdAndUpdate(
+        parentId,
+        { $addToSet: { children: String(node._id) } }
       );
     }
 
@@ -125,16 +115,16 @@ router.put("/:id", requireAuth, async (req, res) => {
 
     if (parentId !== undefined && parentId !== node.parentId) {
       if (node.parentId) {
-        await Node.findOneAndUpdate(
-          { horizonId: node.horizonId, nodeId: node.parentId },
-          { $pull: { children: node.nodeId } }
+        await Node.findByIdAndUpdate(
+          node.parentId,
+          { $pull: { children: String(node._id) } }
         );
       }
 
       if (parentId) {
-        await Node.findOneAndUpdate(
-          { horizonId: node.horizonId, nodeId: parentId },
-          { $addToSet: { children: node.nodeId } }
+        await Node.findByIdAndUpdate(
+          parentId,
+          { $addToSet: { children: String(node._id) } }
         );
       }
 
@@ -179,19 +169,16 @@ router.delete("/:id", requireAuth, async (req, res) => {
       });
     }
 
-    const descendants = await Node.find({
-      horizonId: node.horizonId,
-      path: new RegExp(`^${node.path}/`),
-      isActive: true
-    });
-    const nodeIds = [node._id, ...descendants.map((d) => d._id)];
+    // Find all descendants using the new recursive method
+    const descendantIds = await Node.findDescendants(String(node._id), node.horizonId);
+    const nodeIds = [node._id, ...descendantIds];
 
     await Node.updateMany({ _id: { $in: nodeIds } }, { $set: { isActive: false } });
 
     if (node.parentId) {
-      await Node.findOneAndUpdate(
-        { horizonId: node.horizonId, nodeId: node.parentId },
-        { $pull: { children: node.nodeId } }
+      await Node.findByIdAndUpdate(
+        node.parentId,
+        { $pull: { children: String(node._id) } }
       );
     }
 
@@ -203,10 +190,70 @@ router.delete("/:id", requireAuth, async (req, res) => {
 
     res.json({
       success: true,
-      message: `Node and ${descendants.length} descendants deleted successfully`,
+      message: `Node and ${descendantIds.length} descendants deleted successfully`,
     });
   } catch (error) {
     console.error("Error deleting node:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// GET /nodes/by-agent/:agentNodeId - Get all outputNodes for an agent (revisions)
+router.get("/by-agent/:agentNodeId", requireAuth, async (req, res) => {
+  try {
+    const userId = req.auth.userId;
+    const { agentNodeId } = req.params;
+    const { horizonId } = req.query;
+
+    if (!horizonId) {
+      return res.status(400).json({
+        success: false,
+        error: "horizonId query parameter is required",
+      });
+    }
+
+    const horizon = await Horizon.findOne({
+      _id: horizonId,
+      isActive: true,
+    });
+
+    if (!horizon) {
+      return res.status(404).json({
+        success: false,
+        error: "Horizon not found",
+      });
+    }
+
+    if (!horizon.hasAccess(userId, "viewer")) {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied",
+      });
+    }
+
+    // Get all outputNodes for this agent, sorted by newest first
+    const outputNodes = await Node.find({
+      horizonId,
+      type: "outputNode",
+      parentId: agentNodeId,
+      isActive: true,
+    })
+      .sort({ createdAt: -1 }) // Newest first
+      .lean();
+
+    res.json({
+      success: true,
+      data: {
+        agentNodeId,
+        total: outputNodes.length,
+        outputs: outputNodes,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching nodes by agent:", error);
     res.status(500).json({
       success: false,
       error: error.message,
