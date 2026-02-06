@@ -19,7 +19,7 @@ router.post("/generate-prompt", requireAuth, async (req, res) => {
       });
     }
 
-    const AI_SERVER_URL = process.env.AI_SERVER_URL || "http://localhost:8001";
+    const AI_SERVER_URL = process.env.AI_SERVICE_URL || "http://localhost:8001";
 
     const response = await fetch(
       `${AI_SERVER_URL}/agents/generate-system-prompt`,

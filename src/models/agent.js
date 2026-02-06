@@ -56,6 +56,11 @@ const AgentSchema = new mongoose.Schema(
     // The core instruction for the agent
     systemPrompt: { type: String, default: "" },
 
+    // Thinking mode configuration
+    enableThinking: { type: Boolean, default: false },
+    maxIterations: { type: Number, default: 5, min: 1, max: 20 },
+    stage: { type: String, default: "" },
+
     // Agent-specific configuration
     config: {
       type: Object,
