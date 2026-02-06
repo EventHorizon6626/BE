@@ -201,6 +201,55 @@ router.delete("/:id", requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /nodes/:id/reactivate - Reactivate an output node
+router.patch("/:id/reactivate", requireAuth, async (req, res) => {
+  try {
+    const userId = req.auth.userId;
+    const { id } = req.params;
+
+    // Find the output node to reactivate
+    const outputNode = await Node.findById(id);
+
+    if (!outputNode) {
+      return res.status(404).json({
+        success: false,
+        error: "Output node not found",
+      });
+    }
+
+    if (outputNode.type !== "outputNode") {
+      return res.status(400).json({
+        success: false,
+        error: "Only output nodes can be reactivated",
+      });
+    }
+
+    // Check access to horizon
+    const horizon = await Horizon.findById(outputNode.horizonId);
+    if (!horizon || !horizon.hasAccess(userId, "editor")) {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied",
+      });
+    }
+
+    outputNode.isActive = true;
+    await outputNode.save();
+
+    res.json({
+      success: true,
+      message: "Output node reactivated successfully",
+      data: outputNode.toJSON(),
+    });
+  } catch (error) {
+    console.error("Error reactivating output node:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // GET /nodes/by-agent/:agentNodeId - Get all outputNodes for an agent (revisions)
 router.get("/by-agent/:agentNodeId", requireAuth, async (req, res) => {
   try {

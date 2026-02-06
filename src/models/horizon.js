@@ -214,18 +214,45 @@ HorizonSchema.statics = {
   buildEdgesFromNodes(nodes) {
     const edges = [];
     
+    // Create a map for quick node lookup
+    const nodeMap = new Map();
     nodes.forEach(node => {
-      // If node has a parent, create an edge from parent to this node
+      nodeMap.set(String(node._id), node);
+    });
+    
+    nodes.forEach(node => {
       if (node.parentId) {
-        const edge = {
-          id: `edge-${node.parentId}-${node.id}`,
-          source: String(node.parentId),
-          target: String(node.id),
-          type: 'custom',
-          animated: false,
-          data: { output: node.data?.output || null },
-        };
-        edges.push(edge);
+        if (node.type === 'outputNode') {
+          const parentNode = nodeMap.get(String(node.parentId));
+          
+          if (parentNode && 
+              parentNode.type === 'agentNode' && 
+              parentNode.children && 
+              parentNode.children.length > 0 &&
+              String(parentNode.children[0]) === String(node._id)) {
+            const edge = {
+              id: `edge-${node.parentId}-${node.id}`,
+              source: String(node.parentId),
+              target: String(node._id),
+              type: 'custom',
+              animated: false,
+              data: { output: node.data?.output || null },
+            };
+            edges.push(edge);
+          } else {
+            console.log(`[buildEdgesFromNodes] Skipping edge for outputNode ${node._id}: parent validation failed`);
+          }
+        } else {
+          const edge = {
+            id: `edge-${node.parentId}-${node.id}`,
+            source: String(node.parentId),
+            target: String(node._id),
+            type: 'custom',
+            animated: false,
+            data: { output: node.data?.output || null },
+          };
+          edges.push(edge);
+        }
       }
     });
     
