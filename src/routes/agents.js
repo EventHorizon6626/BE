@@ -1,4 +1,5 @@
 import express from "express";
+import mongoose from "mongoose";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { Agent } from "../models/agent.js";
 
@@ -76,6 +77,11 @@ router.post("/", requireAuth, async (req, res) => {
       system,
       systemPrompt,
       config,
+      horizonId,
+      teamId,
+      model,
+      icon,
+      color,
     } = req.body;
 
     if (!name || !name.trim()) {
@@ -89,11 +95,16 @@ router.post("/", requireAuth, async (req, res) => {
 
     const agent = new Agent({
       userId,
+      horizonId: horizonId || undefined,
+      teamId: (teamId && mongoose.Types.ObjectId.isValid(teamId)) ? teamId : undefined,
       name: name.trim(),
       description: description || "",
       type: type || "custom_agent",
       category: category || "custom_analyzer",
       system: system || "data",
+      model: model || "gpt-4",
+      icon: icon || "MdSmartToy",
+      color: color || "blue",
       systemPrompt: systemPrompt ? systemPrompt.trim() : "",
       config: config || {},
       isActive: true,
