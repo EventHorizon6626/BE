@@ -6,9 +6,9 @@ import { Horizon } from "../models/horizon.js";
 
 const router = express.Router();
 
-// POST /api/agents/generate-prompt - Generate system prompt from description
+// POST /api/agents/generate-agent-system-prompt - Generate system prompt from description
 // (defined before /:id to avoid path conflict)
-router.post("/generate-prompt", requireAuth, async (req, res) => {
+router.post("/generate-agent-system-prompt", requireAuth, async (req, res) => {
   try {
     const { name, description, category } = req.body;
 
@@ -22,7 +22,7 @@ router.post("/generate-prompt", requireAuth, async (req, res) => {
     const AI_SERVER_URL = process.env.AI_SERVICE_URL || "http://localhost:8001";
 
     const response = await fetch(
-      `${AI_SERVER_URL}/agents/generate-system-prompt`,
+      `${AI_SERVER_URL}/agents/generate-agent-system-prompt`,
       {
         method: "POST",
         headers: {

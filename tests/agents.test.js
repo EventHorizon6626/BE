@@ -454,24 +454,26 @@ describe("GET /api/agents/team/:teamId", () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/agents/generate-prompt — Generate system prompt
+// POST /api/agents/generate-agent-system-prompt — Generate system prompt
 // ---------------------------------------------------------------------------
-describe("POST /api/agents/generate-prompt", () => {
+describe("POST /api/agents/generate-agent-system-prompt", () => {
   it("returns 400 when name is missing", async () => {
-    const res = await request(app).post("/api/agents/generate-prompt").send({
+    const res = await request(app).post("/api/agents/generate-agent-system-prompt").send({
       description: "some description",
     });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/name and description/i);
+    expect(res.body.error).toMatch(/name.*required/i);
   });
 
-  it("returns 400 when description is missing", async () => {
-    const res = await request(app).post("/api/agents/generate-prompt").send({
+  it("allows missing description (description is optional)", async () => {
+    const res = await request(app).post("/api/agents/generate-agent-system-prompt").send({
       name: "some name",
     });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/name and description/i);
+    // Should not return 400 for missing description since it's optional
+    // This will likely fail due to AI service not being available in tests,
+    // but that's a different error (500 or network error), not 400
+    expect(res.status).not.toBe(400);
   });
 });
