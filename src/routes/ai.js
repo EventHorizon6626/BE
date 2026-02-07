@@ -169,6 +169,50 @@ aiRouter.post("/chart", requireAuth, async (req, res) => {
  * Forward requests to specific agents for pipeline builder
  */
 
+/**
+ * Normalize agent responses to a consistent format
+ * Transforms agent-specific response structures into common format
+ * while preserving original data for debugging
+ */
+function normalizeAgentResponse(agentName, rawResponse) {
+  const normalized = {
+    ...rawResponse,
+    agent_type: agentName,
+  };
+
+  // Detect and normalize data_by_symbol field
+  let dataBySymbol = null;
+  let dataFieldName = null;
+
+  const fieldMappings = {
+    chart_data_by_symbol: 'chart_data_by_symbol',
+    earnings_data_by_symbol: 'earnings_data_by_symbol',
+    news_data_by_symbol: 'news_data_by_symbol',
+    technical_data_by_symbol: 'technical_data_by_symbol',
+    fundamentals_data_by_symbol: 'fundamentals_data_by_symbol',
+  };
+
+  for (const [fieldName, mappedName] of Object.entries(fieldMappings)) {
+    if (rawResponse[fieldName]) {
+      dataBySymbol = rawResponse[fieldName];
+      dataFieldName = fieldName;
+      break;
+    }
+  }
+
+  if (dataBySymbol) {
+    normalized.data_by_symbol = dataBySymbol;
+    normalized.original_field_name = dataFieldName;
+    normalized.raw_data = { ...rawResponse };
+
+    console.log(`[Normalizer] ${agentName}: Normalized ${dataFieldName} -> data_by_symbol (${Object.keys(dataBySymbol).length} symbols)`);
+  } else {
+    console.warn(`[Normalizer] ${agentName}: No recognized data_by_symbol field found`);
+  }
+
+  return normalized;
+}
+
 // Generic agent proxy handler
 async function proxyAgentRequest(agentName, req, res) {
   try {
@@ -212,7 +256,9 @@ async function proxyAgentRequest(agentName, req, res) {
     }
 
     const Aidata = await aiResponse.json();
+    const normalizedData = normalizeAgentResponse(agentName, Aidata);
     console.log(`[AI Proxy] ${agentName} agent completed successfully`);
+    console.log(`[AI Proxy] Response structure:`, Object.keys(normalizedData));
 
     // Auto-save outputNode to DB
     try {
@@ -230,7 +276,7 @@ async function proxyAgentRequest(agentName, req, res) {
             y: agentPosition.y
           } : { x: 0, y: 0 },
           data: {
-            result: Aidata,
+            result: normalizedData,
             agentName: agentName,
             timestamp: new Date().toISOString(),
             metadata: {
@@ -267,7 +313,7 @@ async function proxyAgentRequest(agentName, req, res) {
 
         // Return result + saved outputNode info
         return res.json({
-          ...Aidata,
+          ...normalizedData,
           _outputNode: {
             id: String(outputNodeDoc._id),
             createdAt: outputNodeDoc.createdAt,
@@ -279,7 +325,7 @@ async function proxyAgentRequest(agentName, req, res) {
       // Continue even if save fails - don't block agent response
     }
 
-    return res.json(Aidata);
+    return res.json(normalizedData);
   } catch (error) {
     console.error(`[AI Proxy] ${agentName} error:`, error);
 
@@ -332,7 +378,7 @@ aiRouter.post("/agents/fundamentals", requireAuth, (req, res) =>
 // Custom Agent (user-provided system prompt)
 aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
   try {
-    const { stocks, system_prompt, user_prompt } = req.body;
+    const { stocks, system_prompt, user_prompt, horizonId, agentNodeId, agentPosition, period, timeframe, agentName } = req.body;
 
     if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
       return res.status(400).json({
@@ -376,6 +422,71 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
 
     const data = await aiResponse.json();
     console.log(`[AI Proxy] Custom agent completed successfully`);
+
+    // Auto-save outputNode to DB
+    try {
+      console.log(`[AI Proxy] Attempting to save outputNode for agentNodeId: ${agentNodeId}, horizonId: ${horizonId}`);
+
+      if (horizonId && agentNodeId) {
+        const outputNode = new Node({
+          userId: req.auth.userId,
+          parentId: agentNodeId,
+          horizonId,
+          type: "outputNode",
+          position: agentPosition ? {
+            x: agentPosition.x + 350,
+            y: agentPosition.y
+          } : { x: 0, y: 0 },
+          data: {
+            result: data,
+            agentName: agentName || "Custom Agent",
+            timestamp: new Date().toISOString(),
+            metadata: {
+              agentType: "custom",
+              symbols: stocks,
+              period: period || "30d",
+              timeframe: timeframe || "1d",
+            },
+          },
+        });
+
+        const outputNodeDoc = await outputNode.save();
+
+        const alloutputNodesOfCurrentAgent = await Node.find({
+          horizonId,
+          parentId: agentNodeId,
+          type: "outputNode",
+          isActive: true,
+        });
+        const oldOutputNodes = alloutputNodesOfCurrentAgent.filter(node => node._id.toString() !== outputNodeDoc._id.toString());
+        if (oldOutputNodes.length > 0) {
+          const oldOutputNodeIds = oldOutputNodes.map(node => node._id);
+          await Node.updateMany(
+            { _id: { $in: oldOutputNodeIds } },
+            { $set: { isActive: false } }
+          );
+          console.log(`[AI Proxy] Marked ${oldOutputNodeIds.length} old outputNodes as inactive for agentNodeId: ${agentNodeId}`);
+        }
+        const agentNode = await Node.findById({ _id: agentNodeId});
+        agentNode.children = [String(outputNodeDoc._id)];
+        await agentNode.save();
+
+        console.log(`[AI Proxy] Saved outputNode: ${outputNodeDoc._id}`);
+
+        // Return result + saved outputNode info
+        return res.json({
+          ...data,
+          _outputNode: {
+            id: String(outputNodeDoc._id),
+            createdAt: outputNodeDoc.createdAt,
+          },
+        });
+      }
+    } catch (saveError) {
+      console.error(`[AI Proxy] Failed to save outputNode:`, saveError);
+      // Continue even if save fails - don't block agent response
+    }
+
     return res.json(data);
   } catch (error) {
     console.error("[AI Proxy] Custom agent error:", error);
