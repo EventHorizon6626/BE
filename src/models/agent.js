@@ -7,17 +7,9 @@ const AgentSchema = new mongoose.Schema(
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
 
     // Horizon context (optional - agents can be global or horizon-specific)
-    horizonId: { 
-      type: mongoose.Schema.Types.ObjectId, 
-      ref: "Horizon", 
-      required: false,
-      index: true 
-    },
-
-    // Team context (for team agents)
-    teamId: {
+    horizonId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Team",
+      ref: "Horizon",
       required: false,
       index: true
     },
@@ -30,12 +22,31 @@ const AgentSchema = new mongoose.Schema(
     // Classification
     category: {
       type: String,
-      enum: ["strategy_agent", "risk_manager", "custom_analyzer", "data_retriever", "news_agent", "technical_agent", "financial_metrics", "api_connector", "researcher"],
+      enum: [
+        // Analyzer categories (System 2)
+        "market_analyzer",
+        "risk_analyzer",
+        "bull_bear_analyzer",
+        "sentiment_analyzer",
+        "technical_analyzer",
+        "fundamental_analyzer",
+        "custom_analyzer",
+        // Data agent categories (System 1)
+        "data_retriever",
+        "news_agent",
+        "technical_agent",
+        "financial_metrics",
+        "api_connector",
+        // Legacy/other
+        "strategy_agent",
+        "risk_manager",
+        "researcher"
+      ],
       default: "custom_analyzer"
     },
     system: {
       type: String,
-      enum: ["data", "team"],
+      enum: ["data", "analyzer"],
       default: "data"
     },
 
@@ -87,7 +98,6 @@ const AgentSchema = new mongoose.Schema(
 AgentSchema.index({ userId: 1, horizonId: 1 });
 AgentSchema.index({ userId: 1, isActive: 1 });
 AgentSchema.index({ horizonId: 1, system: 1, isActive: 1 });
-AgentSchema.index({ teamId: 1, isActive: 1 });
 
 // Transform for JSON response
 AgentSchema.set("toJSON", {
@@ -107,18 +117,6 @@ AgentSchema.statics.findByHorizon = async function(horizonId, options = {}) {
     horizonId,
     ...(includeInactive ? {} : { isActive: true }),
     ...(system ? { system } : {}),
-  };
-
-  const agents = await this.find(query).sort({ createdAt: -1 });
-  return agents;
-};
-
-AgentSchema.statics.findByTeam = async function(teamId, options = {}) {
-  const { includeInactive = false } = options;
-
-  const query = {
-    teamId,
-    ...(includeInactive ? {} : { isActive: true }),
   };
 
   const agents = await this.find(query).sort({ createdAt: -1 });

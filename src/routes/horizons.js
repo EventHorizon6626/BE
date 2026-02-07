@@ -4,7 +4,6 @@ import { Horizon } from "../models/horizon.js";
 import { Node } from "../models/node.js";
 import { Portfolio } from "../models/portfolio.js";
 import { Agent } from "../models/agent.js";
-import { Team } from "../models/team.js";
 
 const router = express.Router();
 
@@ -69,25 +68,16 @@ router.get("/:id", requireAuth, async (req, res) => {
 
     const portfolios = await Portfolio.findByHorizon(horizon._id);
 
+    // Fetch agents by system type
     const dataAgents = await Agent.findByHorizon(horizon._id, {
       system: "data",
     });
-    const teamAgents = await Agent.findByHorizon(horizon._id, {
-      system: "team",
-    });
-
-    const teams = await Team.findByHorizon(horizon._id);
-
-    const teamsWithAgents = teams.map((team) => {
-      const teamJSON = team.toJSON();
-      teamJSON.agents = teamAgents
-        .filter((agent) => String(agent.teamId) === String(team._id))
-        .map((agent) => agent.toJSON());
-      return teamJSON;
+    const analyzerAgents = await Agent.findByHorizon(horizon._id, {
+      system: "analyzer",
     });
 
     const horizonData = horizon.toJSON();
-    
+
     // Map nodes to React Flow format
     horizonData.nodes = nodes.map((node) => ({
       id: String(node._id),
@@ -105,11 +95,13 @@ router.get("/:id", requireAuth, async (req, res) => {
       createdAt: p.createdAt,
     }));
 
-    horizonData.availableAgents = dataAgents.map((agent) => ({
+    // System 1: Data Agents
+    horizonData.dataAgents = dataAgents.map((agent) => ({
       id: String(agent._id),
       name: agent.name,
       type: agent.type,
       system: agent.system,
+      category: agent.category,
       icon: agent.icon,
       color: agent.color,
       isBuiltin: agent.isBuiltin,
@@ -120,16 +112,34 @@ router.get("/:id", requireAuth, async (req, res) => {
       maxIterations: agent.maxIterations,
     }));
 
-    horizonData.availableTeams = teamsWithAgents;
+    // System 2: Analyzer Agents
+    horizonData.analyzerAgents = analyzerAgents.map((agent) => ({
+      id: String(agent._id),
+      name: agent.name,
+      type: agent.type,
+      system: agent.system,
+      category: agent.category,
+      icon: agent.icon,
+      color: agent.color,
+      isBuiltin: agent.isBuiltin,
+      description: agent.description,
+      model: agent.model,
+      systemPrompt: agent.systemPrompt,
+      enableThinking: agent.enableThinking,
+      maxIterations: agent.maxIterations,
+    }));
 
-    horizonData.customAgents = [...dataAgents, ...teamAgents]
+    // Backward compatibility: availableAgents = dataAgents
+    horizonData.availableAgents = horizonData.dataAgents;
+
+    horizonData.customAgents = [...dataAgents, ...analyzerAgents]
       .filter((agent) => !agent.isBuiltin)
       .map((agent) => ({
         id: String(agent._id),
         name: agent.name,
         type: agent.type,
         system: agent.system,
-        teamId: agent.teamId ? String(agent.teamId) : null,
+        category: agent.category,
         icon: agent.icon,
         color: agent.color,
         isBuiltin: agent.isBuiltin,
@@ -166,7 +176,6 @@ router.post("/", requireAuth, async (req, res) => {
       nodes,
       // edges are auto-generated, no need to accept from client
       availableAgents,
-      availableTeams,
       customAgents,
       portfolios,
       tags,
@@ -187,7 +196,6 @@ router.post("/", requireAuth, async (req, res) => {
       nodes: nodes || [],
       // edges removed - will be auto-generated from nodes
       availableAgents: availableAgents || [],
-      availableTeams: availableTeams || [],
       customAgents: customAgents || [],
       portfolios: portfolios || [],
       tags: tags || [],
@@ -237,7 +245,6 @@ router.put("/:id", requireAuth, async (req, res) => {
       nodes,
       // edges are auto-generated, no need to accept from client
       availableAgents,
-      availableTeams,
       customAgents,
       portfolios,
       tags,
@@ -317,7 +324,6 @@ router.put("/:id", requireAuth, async (req, res) => {
     // Note: edges are auto-generated from nodes' parentId, no need to save
     if (availableAgents !== undefined)
       horizon.availableAgents = availableAgents;
-    if (availableTeams !== undefined) horizon.availableTeams = availableTeams;
     if (customAgents !== undefined) horizon.customAgents = customAgents;
     if (portfolios !== undefined) horizon.portfolios = portfolios;
     if (tags !== undefined) horizon.tags = tags;

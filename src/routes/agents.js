@@ -10,7 +10,7 @@ const router = express.Router();
 // (defined before /:id to avoid path conflict)
 router.post("/generate-prompt", requireAuth, async (req, res) => {
   try {
-    const { name, description, team, category } = req.body;
+    const { name, description, category } = req.body;
 
     if (!name) {
       return res.status(400).json({
@@ -31,7 +31,6 @@ router.post("/generate-prompt", requireAuth, async (req, res) => {
         body: JSON.stringify({
           name,
           description: description || "",
-          team: team || "Team 1",
           category: category || "strategy_agent",
         }),
       }
@@ -97,29 +96,6 @@ router.get("/horizon/:horizonId", requireAuth, async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Failed to retrieve agents",
-      details: error.message,
-    });
-  }
-});
-
-// GET /api/agents/team/:teamId - Get agents by team
-// (defined before /:id to avoid path conflict)
-router.get("/team/:teamId", requireAuth, async (req, res) => {
-  try {
-    const { teamId } = req.params;
-
-    const agents = await Agent.findByTeam(teamId);
-
-    return res.status(200).json({
-      success: true,
-      data: agents.map((a) => a.toJSON()),
-      count: agents.length,
-    });
-  } catch (error) {
-    console.error("Error fetching agents by team:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Failed to retrieve team agents",
       details: error.message,
     });
   }
@@ -200,7 +176,6 @@ router.post("/", requireAuth, async (req, res) => {
       maxIterations,
       config,
       horizonId,
-      teamId,
       model,
       icon,
       color,
@@ -235,7 +210,6 @@ router.post("/", requireAuth, async (req, res) => {
     const agent = new Agent({
       userId,
       horizonId: horizonId || undefined,
-      teamId: teamId && mongoose.Types.ObjectId.isValid(teamId) ? teamId : undefined,
       name: name.trim(),
       description: description || "",
       type: type || "custom_agent",
@@ -298,7 +272,6 @@ router.put("/:id", requireAuth, async (req, res) => {
       model,
       icon,
       color,
-      teamId,
     } = req.body;
 
     if (name !== undefined) agent.name = name.trim();
@@ -319,7 +292,6 @@ router.put("/:id", requireAuth, async (req, res) => {
     if (model !== undefined) agent.model = model;
     if (icon !== undefined) agent.icon = icon;
     if (color !== undefined) agent.color = color;
-    if (teamId !== undefined) agent.teamId = teamId;
 
     await agent.save();
 

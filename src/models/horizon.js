@@ -41,7 +41,8 @@ const HorizonSchema = new mongoose.Schema(
         id: { type: String, required: true },
         name: { type: String, required: true },
         type: String,
-        system: { type: String, enum: ["data", "team"], default: "data" },
+        system: { type: String, enum: ["data", "analyzer"], default: "data" },
+        category: String,
         icon: String,
         color: String,
         isBuiltin: { type: Boolean, default: false },
@@ -53,22 +54,13 @@ const HorizonSchema = new mongoose.Schema(
       },
     ],
 
-    availableTeams: [
-      {
-        id: { type: String, required: true },
-        name: { type: String, required: true },
-        description: String,
-        agents: [mongoose.Schema.Types.Mixed],
-      },
-    ],
-
     customAgents: [
       {
         id: { type: String, required: true },
         name: { type: String, required: true },
         type: String,
         system: String,
-        teamId: String,
+        category: String,
         icon: String,
         color: String,
         isBuiltin: { type: Boolean, default: false },
