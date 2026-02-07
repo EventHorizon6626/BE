@@ -8,6 +8,7 @@ import horizonRoutes from "./routes/horizons.js";
 import nodeRoutes from "./routes/nodes.js";
 import agentRoutes from "./routes/agents.js";
 import portfolioRoutes from "./routes/portfolios.js";
+import searchRoutes from "./routes/search.js";
 import { requestLogger } from "./middleware/requestLogger.js";
 
 export const app = express();
@@ -58,5 +59,6 @@ app.use("/api/horizons", horizonRoutes);
 app.use("/api/nodes", nodeRoutes);
 app.use("/api/portfolios", portfolioRoutes);
 app.use("/api/agents", agentRoutes);
+app.use("/api/search", searchRoutes);
 
 app.get("/healthz", (req, res) => res.json({ ok: true, ts: Date.now() }));
