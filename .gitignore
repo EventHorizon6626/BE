@@ -76,3 +76,7 @@ lib-cov/
 bower_components/
 *.tgz
 *.log.*
+
+# Documentation (ignore all .md except README.md)
+*.md
+!README.md
