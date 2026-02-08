@@ -259,11 +259,17 @@ async function proxyAgentRequest(agentName, req, res) {
     console.log(`[AI Proxy] ${agentName} agent completed (provider: ${Aidata._provider || 'unknown'})`);
     console.log(`[AI Proxy] Response structure:`, Object.keys(normalizedData));
 
+    // Skip saving outputNode if agent needs data (FE will handle the flow)
+    if (Aidata.status === 'needs_data') {
+      console.log(`[AI Proxy] ${agentName} agent needs data, skipping outputNode save`);
+      return res.json(normalizedData);
+    }
+
     // Auto-save outputNode to DB
     try {
       const { horizonId, agentNodeId, agentPosition } = req.body;
       console.log(`[AI Proxy] Attempting to save outputNode for agentNodeId: ${agentNodeId}, horizonId: ${horizonId}`);
-      
+
       if (horizonId && agentNodeId) {
         const outputNode = new Node({
           userId: req.auth.userId,
@@ -741,6 +747,12 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
     const normalizedData = normalizeAgentResponse("custom", data);
 
     console.log(`[AI Proxy] Custom agent completed (provider: ${provider}, status: ${data.status || 'success'})`);
+
+    // Skip saving outputNode if agent needs data (FE will handle the flow)
+    if (data.status === 'needs_data') {
+      console.log(`[AI Proxy] Custom agent needs data, skipping outputNode save`);
+      return res.json(normalizedData);
+    }
 
     // Auto-save outputNode to DB
     try {
