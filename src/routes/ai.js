@@ -408,9 +408,9 @@ async function routeDataAgentRequest(agentName, requestBody) {
  */
 async function callEHMultiAgentDataEndpoint(agentName, requestBody) {
   const EH_MULTI_AGENT_BASE_URL = process.env.EH_MULTI_AGENT_URL || "http://20.74.82.247:8030";
-  const endpoint = `${EH_MULTI_AGENT_BASE_URL}/data/${agentName}`;
+  const endpoint = `${EH_MULTI_AGENT_BASE_URL}/agents/${agentName}`;
 
-  console.log(`[EH-Multi-Agent Data] Calling ${endpoint}`);
+  console.log(`[EH-Multi-Agent] Calling ${endpoint}`);
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -424,12 +424,12 @@ async function callEHMultiAgentDataEndpoint(agentName, requestBody) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`[EH-Multi-Agent Data] Error ${response.status}:`, errorText);
+    console.error(`[EH-Multi-Agent] Error ${response.status}:`, errorText);
     throw new Error(`EH Multi-Agent ${agentName} error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
-  console.log(`[EH-Multi-Agent Data] ${agentName} call successful`);
+  console.log(`[EH-Multi-Agent] ${agentName} call successful`);
 
   // Add provider metadata
   return {
