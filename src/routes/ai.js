@@ -216,7 +216,19 @@ function normalizeAgentResponse(agentName, rawResponse) {
 // Generic agent proxy handler
 async function proxyAgentRequest(agentName, req, res) {
   try {
-    const { stocks, timeframe, period, days, indicators, data } = req.body;
+    const {
+      stocks,
+      timeframe,
+      period,
+      days,
+      indicators,
+      data,
+      // Thinking agent parameters
+      input_data,
+      system_prompt,
+      max_iterations,
+      available_tools,
+    } = req.body;
 
     if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
       return res.status(400).json({
@@ -227,37 +239,24 @@ async function proxyAgentRequest(agentName, req, res) {
 
     console.log(`[AI Proxy] Running ${agentName} agent for ${stocks.length} stocks`);
 
-    const aiResponse = await fetch(`${AI_SERVICE_URL}/agents/${agentName}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        stocks,
-        timeframe: timeframe || "1d",
-        period: period || "30d",
-        days: days || 7,
-        indicators: indicators || ["SMA", "RSI", "MACD"],
-        data: data || null, // For System 2 agents
-      }),
-      signal: AbortSignal.timeout(60000),
-    });
+    const requestBody = {
+      stocks,
+      timeframe: timeframe || "1d",
+      period: period || "30d",
+      days: days || 7,
+      indicators: indicators || ["SMA", "RSI", "MACD"],
+      data: data || null, // For System 2 agents
+      // Thinking agent parameters (used by bull-bear-analyzer and thinking agents)
+      input_data: input_data || data || null,
+      system_prompt: system_prompt || null,
+      max_iterations: max_iterations || 5,
+      available_tools: available_tools || ["candlestick", "earnings", "news", "technical", "fundamentals"],
+    };
 
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error(`[AI Proxy] ${agentName} agent error ${aiResponse.status}:`, errorText);
-
-      return res.status(aiResponse.status).json({
-        error: "AI service error",
-        message: errorText || `Failed to run ${agentName} agent`,
-        status: aiResponse.status,
-      });
-    }
-
-    const Aidata = await aiResponse.json();
+    // Route to configured provider
+    const Aidata = await routeDataAgentRequest(agentName, requestBody);
     const normalizedData = normalizeAgentResponse(agentName, Aidata);
-    console.log(`[AI Proxy] ${agentName} agent completed successfully`);
+    console.log(`[AI Proxy] ${agentName} agent completed (provider: ${Aidata._provider || 'unknown'})`);
     console.log(`[AI Proxy] Response structure:`, Object.keys(normalizedData));
 
     // Auto-save outputNode to DB
@@ -284,6 +283,7 @@ async function proxyAgentRequest(agentName, req, res) {
               symbols: stocks,
               period: period || "30d",
               timeframe: timeframe || "1d",
+              provider: Aidata._provider || 'unknown',
             },
           },
         });
@@ -375,10 +375,328 @@ aiRouter.post("/agents/fundamentals", requireAuth, (req, res) =>
   proxyAgentRequest("fundamentals", req, res)
 );
 
-// Custom Agent (user-provided system prompt)
+/**
+ * Route data agent requests to appropriate provider
+ * Uses AGENT_PROVIDER to control routing for ALL agents
+ * @param {string} agentName - Agent type (candlestick, earnings, news, technical, fundamentals)
+ * @param {object} requestBody - Request payload
+ * @returns {Promise<object>} - Agent response with provider metadata
+ */
+async function routeDataAgentRequest(agentName, requestBody) {
+  const provider = process.env.AGENT_PROVIDER || "event-horizon-ai";
+
+  console.log(`[Agent Router] Routing ${agentName} to provider: ${provider}`);
+
+  if (provider === "eh-multi-agent") {
+    return await callEHMultiAgentDataEndpoint(agentName, requestBody);
+  } else if (provider === "event-horizon-ai") {
+    return await callEventHorizonAIEndpoint(agentName, requestBody);
+  } else if (provider === "google") {
+    // Google doesn't support data agents, fallback to Event-Horizon-AI
+    console.warn(`[Agent Router] Provider "${provider}" doesn't support data agents, using event-horizon-ai as fallback`);
+    return await callEventHorizonAIEndpoint(agentName, requestBody);
+  } else {
+    throw new Error(`Unknown AGENT_PROVIDER: ${provider}. Must be "event-horizon-ai", "eh-multi-agent", or "google"`);
+  }
+}
+
+/**
+ * Call EH Multi-Agent data retrieval endpoint
+ * @param {string} agentName - Agent type (candlestick, earnings, news, etc.)
+ * @param {object} requestBody - Request payload
+ * @returns {Promise<object>} - Data response
+ */
+async function callEHMultiAgentDataEndpoint(agentName, requestBody) {
+  const EH_MULTI_AGENT_BASE_URL = process.env.EH_MULTI_AGENT_URL || "http://20.74.82.247:8030";
+  const endpoint = `${EH_MULTI_AGENT_BASE_URL}/data/${agentName}`;
+
+  console.log(`[EH-Multi-Agent Data] Calling ${endpoint}`);
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(60000), // 60 second timeout
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[EH-Multi-Agent Data] Error ${response.status}:`, errorText);
+    throw new Error(`EH Multi-Agent ${agentName} error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  console.log(`[EH-Multi-Agent Data] ${agentName} call successful`);
+
+  // Add provider metadata
+  return {
+    ...data,
+    _provider: "eh-multi-agent",
+  };
+}
+
+/**
+ * Call Event-Horizon-AI endpoint (existing default behavior)
+ * @param {string} agentName - Agent type
+ * @param {object} requestBody - Request payload
+ * @returns {Promise<object>} - Data response
+ */
+async function callEventHorizonAIEndpoint(agentName, requestBody) {
+  const response = await fetch(`${AI_SERVICE_URL}/agents/${agentName}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(60000),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[Event-Horizon-AI] Error ${response.status}:`, errorText);
+    throw new Error(`Event-Horizon-AI ${agentName} error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+
+  // Add provider metadata
+  return {
+    ...data,
+    _provider: "event-horizon-ai",
+  };
+}
+
+/**
+ * Call Google Gemini API for custom agent analysis
+ * @param {Array} stocks - Array of stock symbols
+ * @param {string} systemPrompt - System prompt for agent behavior
+ * @param {string} userPrompt - Optional user prompt
+ * @param {object} earningsData - Optional earnings data from prior agents
+ * @returns {Promise<object>} - Normalized response
+ */
+async function analyzeWithGoogle(stocks, systemPrompt, userPrompt, earningsData = null) {
+  const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+  const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash-exp";
+
+  if (!GOOGLE_API_KEY || GOOGLE_API_KEY === "your_google_api_key_here") {
+    throw new Error("GOOGLE_API_KEY not configured");
+  }
+
+  console.log("[Google Provider] Calling Google Gemini API with model:", GEMINI_MODEL);
+
+  // Construct prompt for Gemini
+  let userMessage = userPrompt || `Analyze the following stocks: ${stocks.join(", ")}`;
+
+  // If earnings data exists, append it to the user message
+  if (earningsData && Array.isArray(earningsData) && earningsData.length > 0) {
+    userMessage += `\n\nEarnings Data:\n${JSON.stringify(earningsData, null, 2)}`;
+  }
+
+  const requestBody = {
+    contents: [
+      {
+        parts: [
+          {
+            text: userMessage
+          }
+        ]
+      }
+    ],
+    systemInstruction: {
+      parts: [
+        {
+          text: systemPrompt
+        }
+      ]
+    },
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 8192,
+    }
+  };
+
+  const geminiResponse = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GOOGLE_API_KEY}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(45000), // 45 second timeout for Gemini
+    }
+  );
+
+  if (!geminiResponse.ok) {
+    const errorText = await geminiResponse.text();
+    console.error(`[Google Provider] API error ${geminiResponse.status}:`, errorText);
+    throw new Error(`Google API error: ${geminiResponse.status} - ${errorText}`);
+  }
+
+  const geminiData = await geminiResponse.json();
+  console.log("[Google Provider] Google API call successful");
+
+  // Normalize Gemini response to match AI service format
+  const analysisText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+  return {
+    status: "success",
+    analysis: analysisText,
+    model: GEMINI_MODEL,
+    provider: "google",
+    usage: geminiData.usageMetadata || null,
+  };
+}
+
+/**
+ * Call EH Multi-Agent analysis endpoint (POST /analyze)
+ * Available endpoints:
+ * - POST /analyze - Run multi-agent analysis
+ * - POST /agents - Create/register agent
+ * - GET /agents/{id} - Retrieve agent data
+ *
+ * @param {Array} stocks - Array of stock symbols
+ * @param {string} systemPrompt - System prompt for agent behavior
+ * @param {string} userPrompt - Optional user prompt
+ * @param {object} earningsData - Optional earnings data from prior agents
+ * @returns {Promise<object>} - Response from EH multi-agent endpoint
+ */
+async function analyzeWithEHMultiAgent(stocks, systemPrompt, userPrompt, earningsData = null) {
+  const EH_MULTI_AGENT_BASE_URL = process.env.EH_MULTI_AGENT_URL || "http://20.74.82.247:8030";
+  const analyzeEndpoint = `${EH_MULTI_AGENT_BASE_URL}/analyze`;
+
+  console.log("[EH-Multi-Agent] Calling EH Multi-Agent endpoint:", analyzeEndpoint);
+
+  // Construct task description that includes stocks and user prompt
+  let taskDescription = systemPrompt;
+  if (userPrompt) {
+    taskDescription += `\n\nUser Request: ${userPrompt}`;
+  }
+  taskDescription += `\n\nStocks to analyze: ${stocks.join(", ")}`;
+
+  // Construct request body for EH multi-agent /analyze endpoint
+  const requestBody = {
+    task: taskDescription,
+    metadata: earningsData || [],
+  };
+
+  const response = await fetch(analyzeEndpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(60000), // 60 second timeout
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[EH-Multi-Agent] Endpoint error ${response.status}:`, errorText);
+    throw new Error(`EH Multi-Agent endpoint error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  console.log("[EH-Multi-Agent] EH Multi-Agent call successful");
+
+  // Add metadata to response
+  return {
+    ...data,
+    provider: "eh-multi-agent",
+  };
+}
+
+/**
+ * Create/register an agent in EH Multi-Agent system (POST /agents)
+ * @param {string} agentName - Name of the agent
+ * @param {string} systemPrompt - System prompt for agent behavior
+ * @param {object} config - Optional agent configuration
+ * @returns {Promise<object>} - Agent registration response with agent ID
+ */
+async function createEHMultiAgent(agentName, systemPrompt, config = {}) {
+  const EH_MULTI_AGENT_BASE_URL = process.env.EH_MULTI_AGENT_URL || "http://20.74.82.247:8030";
+  const createEndpoint = `${EH_MULTI_AGENT_BASE_URL}/agents`;
+
+  console.log("[EH-Multi-Agent] Creating agent:", agentName);
+
+  const requestBody = {
+    name: agentName,
+    system_prompt: systemPrompt,
+    ...config,
+  };
+
+  const response = await fetch(createEndpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(30000), // 30 second timeout
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[EH-Multi-Agent] Create agent error ${response.status}:`, errorText);
+    throw new Error(`Failed to create EH Multi-Agent: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  console.log("[EH-Multi-Agent] Agent created successfully:", data.agent_id || data.id);
+
+  return data;
+}
+
+/**
+ * Retrieve agent data from EH Multi-Agent system (GET /agents/{id})
+ * @param {string} agentId - Agent ID to retrieve
+ * @returns {Promise<object>} - Agent data
+ */
+async function retrieveEHMultiAgentData(agentId) {
+  const EH_MULTI_AGENT_BASE_URL = process.env.EH_MULTI_AGENT_URL || "http://20.74.82.247:8030";
+  const retrieveEndpoint = `${EH_MULTI_AGENT_BASE_URL}/agents/${agentId}`;
+
+  console.log("[EH-Multi-Agent] Retrieving agent data:", agentId);
+
+  const response = await fetch(retrieveEndpoint, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+    signal: AbortSignal.timeout(30000), // 30 second timeout
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[EH-Multi-Agent] Retrieve agent error ${response.status}:`, errorText);
+    throw new Error(`Failed to retrieve EH Multi-Agent data: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  console.log("[EH-Multi-Agent] Agent data retrieved successfully");
+
+  return data;
+}
+
+// Custom Agent (user-provided system prompt) with provider switching
 aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
   try {
-    const { stocks, system_prompt, user_prompt, horizonId, agentNodeId, agentPosition, period, timeframe, agentName } = req.body;
+    const {
+      stocks,
+      system_prompt,
+      user_prompt,
+      horizonId,
+      agentNodeId,
+      agentPosition,
+      period,
+      timeframe,
+      agentName,
+      metadata // Optional earnings data from prior agents
+    } = req.body;
 
     if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
       return res.status(400).json({
@@ -394,34 +712,35 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
       });
     }
 
-    console.log(`[AI Proxy] Running custom agent for ${stocks.length} stocks`);
+    // Get configured provider from environment
+    const provider = process.env.AGENT_PROVIDER || "eh-multi-agent";
+    console.log(`[AI Proxy] Running custom agent with provider: ${provider}`);
 
-    const aiResponse = await fetch(`${AI_SERVICE_URL}/agents/custom`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        stocks,
-        system_prompt,
-        user_prompt: user_prompt || null,
-      }),
-      signal: AbortSignal.timeout(60000),
-    });
+    let data = null;
 
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error(`[AI Proxy] Custom agent error ${aiResponse.status}:`, errorText);
-      return res.status(aiResponse.status).json({
-        error: "AI service error",
-        message: errorText || "Failed to run custom agent",
-        status: aiResponse.status,
+    // Route to appropriate provider
+    try {
+      if (provider === "google") {
+        data = await analyzeWithGoogle(stocks, system_prompt, user_prompt, metadata);
+      } else if (provider === "eh-multi-agent") {
+        data = await analyzeWithEHMultiAgent(stocks, system_prompt, user_prompt, metadata);
+      } else {
+        throw new Error(`Unknown AGENT_PROVIDER: ${provider}. Must be "google" or "eh-multi-agent"`);
+      }
+    } catch (error) {
+      console.error(`[AI Proxy] ${provider} provider failed:`, error.message);
+      return res.status(503).json({
+        error: "Provider unavailable",
+        message: `${provider} provider failed: ${error.message}`,
+        provider: provider,
       });
     }
 
-    const data = await aiResponse.json();
-    console.log(`[AI Proxy] Custom agent completed successfully`);
+    // Normalize response if needed
+    // Note: This handles both "needs_data" and "success" status responses
+    const normalizedData = normalizeAgentResponse("custom", data);
+
+    console.log(`[AI Proxy] Custom agent completed (provider: ${provider}, status: ${data.status || 'success'})`);
 
     // Auto-save outputNode to DB
     try {
@@ -438,7 +757,7 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
             y: agentPosition.y
           } : { x: 0, y: 0 },
           data: {
-            result: data,
+            result: normalizedData,
             agentName: agentName || "Custom Agent",
             timestamp: new Date().toISOString(),
             metadata: {
@@ -446,6 +765,7 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
               symbols: stocks,
               period: period || "30d",
               timeframe: timeframe || "1d",
+              provider: data.provider,
             },
           },
         });
@@ -467,7 +787,7 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
           );
           console.log(`[AI Proxy] Marked ${oldOutputNodeIds.length} old outputNodes as inactive for agentNodeId: ${agentNodeId}`);
         }
-        const agentNode = await Node.findById({ _id: agentNodeId});
+        const agentNode = await Node.findById({ _id: agentNodeId });
         agentNode.children = [String(outputNodeDoc._id)];
         await agentNode.save();
 
@@ -475,7 +795,7 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
 
         // Return result + saved outputNode info
         return res.json({
-          ...data,
+          ...normalizedData,
           _outputNode: {
             id: String(outputNodeDoc._id),
             createdAt: outputNodeDoc.createdAt,
@@ -487,21 +807,14 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
       // Continue even if save fails - don't block agent response
     }
 
-    return res.json(data);
+    return res.json(normalizedData);
   } catch (error) {
-    console.error("[AI Proxy] Custom agent error:", error);
+    console.error(`[AI Proxy] Custom agent error:`, error);
 
     if (error.name === "TimeoutError" || error.name === "AbortError") {
       return res.status(504).json({
         error: "Request timeout",
         message: "Custom agent took too long to respond",
-      });
-    }
-
-    if (error.cause?.code === "ECONNREFUSED") {
-      return res.status(503).json({
-        error: "Service unavailable",
-        message: "AI service is not responding",
       });
     }
 
@@ -542,6 +855,16 @@ aiRouter.post("/agents/bear-researcher", requireAuth, (req, res) =>
 
 aiRouter.post("/agents/research-manager", requireAuth, (req, res) =>
   proxyAgentRequest("research-manager", req, res)
+);
+
+// Bull-Bear Analyzer - Standalone thinking agent for bull/bear debate
+aiRouter.post("/agents/bull-bear-analyzer", requireAuth, (req, res) =>
+  proxyAgentRequest("bull-bear-analyzer", req, res)
+);
+
+// Bull-Bear Analyzer (backward compatibility with underscore naming)
+aiRouter.post("/agents/bull_bear_analyzer", requireAuth, (req, res) =>
+  proxyAgentRequest("bull-bear-analyzer", req, res)
 );
 
 // ===== System 2: Team 3 Portfolio =====
