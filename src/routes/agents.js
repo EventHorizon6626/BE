@@ -19,7 +19,13 @@ router.post("/generate-agent-system-prompt", requireAuth, async (req, res) => {
       });
     }
 
-    const AI_SERVER_URL = process.env.AI_SERVICE_URL || "http://localhost:8001";
+    // Use unified provider system (defaults to eh-multi-agent)
+    const provider = process.env.AGENT_PROVIDER || "eh-multi-agent";
+    const AI_SERVER_URL = provider === "eh-multi-agent"
+      ? (process.env.EH_MULTI_AGENT_URL || "http://20.74.82.247:8030")
+      : (process.env.AI_SERVICE_URL || "http://localhost:8001");
+
+    console.log(`[Generate Prompt] Using provider: ${provider} at ${AI_SERVER_URL}`);
 
     const response = await fetch(
       `${AI_SERVER_URL}/agents/generate-agent-system-prompt`,
@@ -33,6 +39,7 @@ router.post("/generate-agent-system-prompt", requireAuth, async (req, res) => {
           description: description || "",
           category: category || "strategy_agent",
         }),
+        signal: AbortSignal.timeout(60000), // 60 second timeout
       }
     );
 
@@ -56,6 +63,24 @@ router.post("/generate-agent-system-prompt", requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error("Error generating prompt:", error);
+
+    // Handle timeout errors
+    if (error.name === "TimeoutError" || error.name === "AbortError") {
+      return res.status(504).json({
+        success: false,
+        error: "Request timeout - AI service took too long to generate prompt. Please try again.",
+      });
+    }
+
+    // Handle connection errors
+    if (error.cause?.code === "ECONNREFUSED") {
+      return res.status(503).json({
+        success: false,
+        error: "AI service unavailable. Please try again later.",
+      });
+    }
+
+    // Generic error
     res.status(500).json({
       success: false,
       error: error.message,
