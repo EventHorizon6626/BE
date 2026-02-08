@@ -559,55 +559,47 @@ async function analyzeWithGoogle(stocks, systemPrompt, userPrompt, earningsData 
 }
 
 /**
- * Call EH Multi-Agent analysis endpoint (POST /analyze)
- * Available endpoints:
- * - POST /analyze - Run multi-agent analysis
- * - POST /agents - Create/register agent
- * - GET /agents/{id} - Retrieve agent data
+ * Call EH Multi-Agent custom agent endpoint (POST /agents/custom)
+ * Uses the thinking loop with create_data_agent / needs_data support.
  *
  * @param {Array} stocks - Array of stock symbols
  * @param {string} systemPrompt - System prompt for agent behavior
  * @param {string} userPrompt - Optional user prompt
- * @param {object} earningsData - Optional earnings data from prior agents
+ * @param {object} inputData - Optional input data from prior agents
  * @returns {Promise<object>} - Response from EH multi-agent endpoint
  */
-async function analyzeWithEHMultiAgent(stocks, systemPrompt, userPrompt, earningsData = null) {
+async function analyzeWithEHMultiAgent(stocks, systemPrompt, userPrompt, inputData = null) {
   const EH_MULTI_AGENT_BASE_URL = process.env.EH_MULTI_AGENT_URL || "http://20.74.82.247:8030";
-  const analyzeEndpoint = `${EH_MULTI_AGENT_BASE_URL}/analyze`;
+  const customEndpoint = `${EH_MULTI_AGENT_BASE_URL}/agents/custom`;
 
-  console.log("[EH-Multi-Agent] Calling EH Multi-Agent endpoint:", analyzeEndpoint);
+  console.log("[EH-Multi-Agent] Calling custom agent endpoint:", customEndpoint);
 
-  // Construct task description that includes stocks and user prompt
-  let taskDescription = systemPrompt;
-  if (userPrompt) {
-    taskDescription += `\n\nUser Request: ${userPrompt}`;
-  }
-  taskDescription += `\n\nStocks to analyze: ${stocks.join(", ")}`;
-
-  // Construct request body for EH multi-agent /analyze endpoint
+  // Construct request body matching EH CustomAgentRequest model
   const requestBody = {
-    task: taskDescription,
-    metadata: earningsData || [],
+    stocks,
+    system_prompt: systemPrompt,
+    user_prompt: userPrompt || null,
+    input_data: inputData || null,
   };
 
-  const response = await fetch(analyzeEndpoint, {
+  const response = await fetch(customEndpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
     },
     body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(60000), // 60 second timeout
+    signal: AbortSignal.timeout(180000), // 180 second timeout (thinking loop needs time)
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`[EH-Multi-Agent] Endpoint error ${response.status}:`, errorText);
-    throw new Error(`EH Multi-Agent endpoint error: ${response.status} - ${errorText}`);
+    console.error(`[EH-Multi-Agent] Custom agent error ${response.status}:`, errorText);
+    throw new Error(`EH Multi-Agent custom agent error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
-  console.log("[EH-Multi-Agent] EH Multi-Agent call successful");
+  console.log("[EH-Multi-Agent] Custom agent call successful, status:", data.status || "success");
 
   // Add metadata to response
   return {
@@ -701,7 +693,7 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
       period,
       timeframe,
       agentName,
-      metadata // Optional earnings data from prior agents
+      input_data // Optional earnings data from prior agents
     } = req.body;
 
     if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
@@ -727,9 +719,9 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
     // Route to appropriate provider
     try {
       if (provider === "google") {
-        data = await analyzeWithGoogle(stocks, system_prompt, user_prompt, metadata);
+        data = await analyzeWithGoogle(stocks, system_prompt, user_prompt, input_data);
       } else if (provider === "eh-multi-agent") {
-        data = await analyzeWithEHMultiAgent(stocks, system_prompt, user_prompt, metadata);
+        data = await analyzeWithEHMultiAgent(stocks, system_prompt, user_prompt, input_data);
       } else {
         throw new Error(`Unknown AGENT_PROVIDER: ${provider}. Must be "google" or "eh-multi-agent"`);
       }
