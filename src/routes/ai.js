@@ -566,9 +566,10 @@ async function analyzeWithGoogle(stocks, systemPrompt, userPrompt, earningsData 
  * @param {string} systemPrompt - System prompt for agent behavior
  * @param {string} userPrompt - Optional user prompt
  * @param {object} inputData - Optional input data from prior agents
+ * @param {string} executionMode - Optional execution mode (e.g. 'fetch_data')
  * @returns {Promise<object>} - Response from EH multi-agent endpoint
  */
-async function analyzeWithEHMultiAgent(stocks, systemPrompt, userPrompt, inputData = null) {
+async function analyzeWithEHMultiAgent(stocks, systemPrompt, userPrompt, inputData = null, executionMode = null) {
   const EH_MULTI_AGENT_BASE_URL = process.env.EH_MULTI_AGENT_URL || "http://20.74.82.247:8030";
   const customEndpoint = `${EH_MULTI_AGENT_BASE_URL}/agents/custom`;
 
@@ -581,6 +582,9 @@ async function analyzeWithEHMultiAgent(stocks, systemPrompt, userPrompt, inputDa
     user_prompt: userPrompt || null,
     input_data: inputData || null,
   };
+  if (executionMode) {
+    requestBody.execution_mode = executionMode;
+  }
 
   const response = await fetch(customEndpoint, {
     method: "POST",
@@ -693,7 +697,8 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
       period,
       timeframe,
       agentName,
-      input_data // Optional earnings data from prior agents
+      input_data, // Optional earnings data from prior agents
+      execution_mode, // Optional execution mode (e.g. 'fetch_data' for DATA agents)
     } = req.body;
 
     if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
@@ -721,7 +726,7 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
       if (provider === "google") {
         data = await analyzeWithGoogle(stocks, system_prompt, user_prompt, input_data);
       } else if (provider === "eh-multi-agent") {
-        data = await analyzeWithEHMultiAgent(stocks, system_prompt, user_prompt, input_data);
+        data = await analyzeWithEHMultiAgent(stocks, system_prompt, user_prompt, input_data, execution_mode);
       } else {
         throw new Error(`Unknown AGENT_PROVIDER: ${provider}. Must be "google" or "eh-multi-agent"`);
       }
