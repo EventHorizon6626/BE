@@ -108,7 +108,7 @@ router.put("/:id", requireAuth, async (req, res) => {
       });
     }
 
-    const { type, parentId, position, data, executionOrder, selected, inputNodeIds, childNodes } =
+    const { type, parentId, blockId, position, data, executionOrder, selected, inputNodeIds, childNodeIds } =
       req.body;
 
     if (type !== undefined) node.type = type;
@@ -117,10 +117,12 @@ router.put("/:id", requireAuth, async (req, res) => {
     if (executionOrder !== undefined) node.executionOrder = executionOrder;
     if (selected !== undefined) node.selected = selected;
     if (inputNodeIds !== undefined) node.inputNodeIds = inputNodeIds;
+    if (blockId !== undefined) node.blockId = blockId;
     
-    // Update childNodes for block type
-    if (childNodes !== undefined && node.type === "block") {
-      node.childNodes = childNodes;
+    // Update childNodeIds for block nodes (array of node IDs)
+    if (childNodeIds !== undefined) {
+      node.childNodeIds = childNodeIds;
+      console.log(`[Node ${node._id}] Updated childNodeIds (count: ${childNodeIds.length})`);
     }
 
     if (parentId !== undefined && parentId !== node.parentId) {
@@ -179,15 +181,29 @@ router.delete("/:id", requireAuth, async (req, res) => {
       });
     }
 
-    // Find all descendants using the new recursive method
-    const descendantIds = await Node.findDescendants(String(node._id), node.horizonId);
-    const nodeIds = [node._id, ...descendantIds];
+    // Special handling for block nodes: delete all child nodes
+    let deletedChildCount = 0;
+    if (node.type === "block" && node.childNodeIds && node.childNodeIds.length > 0) {
+      // Delete all nodes that are inside this block
+      const deleteResult = await Node.updateMany(
+        { 
+          _id: { $in: node.childNodeIds },
+          isActive: true 
+        },
+        { $set: { isActive: false, blockId: null } }
+      );
+      deletedChildCount = deleteResult.modifiedCount;
+      console.log(`[Delete Block] Deleted ${deletedChildCount} child nodes from block ${node._id}`);
+    }
 
-    // Set all nodes and descendants as inactive
-    await Node.updateMany({ _id: { $in: nodeIds } }, { $set: { isActive: false } });
+    // Delete the block/node itself
+    await Node.updateMany(
+      { _id: node._id }, 
+      { $set: { isActive: false } }
+    );
 
-    // Clear parentId of any active nodes that reference this deleted node
-    // This handles cases where nodes might reference this node but weren't in descendants
+    // Clear parentId of any nodes that reference this deleted node
+    // This makes child nodes become disconnected (no parent)
     await Node.updateMany(
       { 
         horizonId: node.horizonId,
@@ -235,7 +251,9 @@ router.delete("/:id", requireAuth, async (req, res) => {
 
     res.json({
       success: true,
-      message: `Node and ${descendantIds.length} descendants deleted successfully`,
+      message: node.type === "block" && deletedChildCount > 0
+        ? `Block and ${deletedChildCount} child nodes deleted successfully`
+        : `Node deleted successfully`,
     });
   } catch (error) {
     console.error("Error deleting node:", error);

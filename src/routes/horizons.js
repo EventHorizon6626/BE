@@ -83,11 +83,40 @@ router.get("/:id", requireAuth, async (req, res) => {
     }
 
     // Load nodes from Node collection instead of horizon.nodes
-    const nodes = await Node.find({
+    let nodes = await Node.find({
       horizonId: horizon._id,
       isActive: true,
     }).sort({ createdAt: 1 });
     console.log(`Loaded ${nodes.length} nodes for horizon ${horizon._id}`);
+
+    // Create a set of valid node IDs for validation
+    let validNodeIds = new Set(nodes.map((node) => String(node._id)));
+
+    // Cleanup orphaned parentIds in database (defensive programming)
+    const nodesToClean = nodes.filter(node => 
+      node.parentId && !validNodeIds.has(String(node.parentId))
+    );
+    
+    if (nodesToClean.length > 0) {
+      console.log(`[Horizon ${horizon._id}] Cleaning ${nodesToClean.length} orphaned parentId references`);
+      await Node.updateMany(
+        { 
+          _id: { $in: nodesToClean.map(n => n._id) },
+          horizonId: horizon._id,
+          isActive: true
+        },
+        { $set: { parentId: null, depth: 0 } }
+      );
+      
+      // Reload nodes after cleanup
+      nodes = await Node.find({
+        horizonId: horizon._id,
+        isActive: true,
+      }).sort({ createdAt: 1 });
+      
+      // Update validNodeIds set
+      validNodeIds = new Set(nodes.map((node) => String(node._id)));
+    }
 
     const portfolios = await Portfolio.findByHorizon(horizon._id);
 
@@ -101,16 +130,24 @@ router.get("/:id", requireAuth, async (req, res) => {
 
     const horizonData = horizon.toJSON();
 
-    // Map nodes to React Flow format
-    horizonData.nodes = nodes.map((node) => ({
-      id: String(node._id),
-      type: node.type,
-      position: node.position,
-      data: node.data,
-      selected: node.selected || false,
-      parentId: node.parentId ? String(node.parentId) : null,
-      inputNodeIds: (node.inputNodeIds || []).map(String),
-    }));
+    // Map nodes to React Flow format and validate parentId references
+    horizonData.nodes = nodes.map((node) => {
+      const parentIdStr = node.parentId ? String(node.parentId) : null;
+      // Only include parentId if it points to an existing active node
+      const validParentId = parentIdStr && validNodeIds.has(parentIdStr) ? parentIdStr : null;
+      
+      return {
+        id: String(node._id),
+        type: node.type,
+        position: node.position,
+        data: node.data,
+        selected: node.selected || false,
+        parentId: validParentId,
+        blockId: node.blockId ? String(node.blockId) : null,
+        inputNodeIds: (node.inputNodeIds || []).map(String),
+        childNodeIds: (node.childNodeIds || []).map(String), // For block nodes: array of child node IDs
+      };
+    });
     horizonData.portfolios = portfolios.map((p) => ({
       id: String(p._id),
       name: p.name,
@@ -296,10 +333,10 @@ router.put("/:id", requireAuth, async (req, res) => {
         (id) => !newNodeIds.has(id)
       );
       if (nodesToDelete.length > 0) {
-        await Node.updateMany(
-          { _id: { $in: nodesToDelete } },
-          { $set: { isActive: false } }
-        );
+        // await Node.updateMany(
+        //   { _id: { $in: nodesToDelete } },
+        //   { $set: { isActive: false } }
+        // );
       }
       
       // Upsert nodes (create or update)
