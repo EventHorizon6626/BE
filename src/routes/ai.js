@@ -400,7 +400,7 @@ aiRouter.post("/agents/web-search", requireAuth, (req, res) =>
  * @returns {Promise<object>} - Agent response with provider metadata
  */
 async function routeDataAgentRequest(agentName, requestBody) {
-  const provider = process.env.AGENT_PROVIDER || "event-horizon-ai";
+  const provider = process.env.AGENT_PROVIDER || "eh-multi-agent";
 
   console.log(`[Agent Router] Routing ${agentName} to provider: ${provider}`);
 
