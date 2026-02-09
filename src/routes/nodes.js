@@ -15,6 +15,7 @@ router.post("/", requireAuth, async (req, res) => {
       position,
       data,
       executionOrder,
+      inputNodeIds,
     } = req.body;
 
     if (!horizonId || !type) {
@@ -51,6 +52,7 @@ router.post("/", requireAuth, async (req, res) => {
       position: position || { x: 0, y: 0 },
       data: data || {},
       executionOrder: executionOrder || 0,
+      inputNodeIds: inputNodeIds || [],
     });
 
     await node.save();
@@ -104,7 +106,7 @@ router.put("/:id", requireAuth, async (req, res) => {
       });
     }
 
-    const { type, parentId, position, data, executionOrder, selected } =
+    const { type, parentId, position, data, executionOrder, selected, inputNodeIds } =
       req.body;
 
     if (type !== undefined) node.type = type;
@@ -112,6 +114,7 @@ router.put("/:id", requireAuth, async (req, res) => {
     if (data !== undefined) node.data = data;
     if (executionOrder !== undefined) node.executionOrder = executionOrder;
     if (selected !== undefined) node.selected = selected;
+    if (inputNodeIds !== undefined) node.inputNodeIds = inputNodeIds;
 
     if (parentId !== undefined && parentId !== node.parentId) {
       if (node.parentId) {

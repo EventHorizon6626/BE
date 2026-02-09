@@ -29,6 +29,10 @@ const NodeSchema = new mongoose.Schema(
       index: true,
     },
 
+    inputNodeIds: [{
+      type: String,
+    }],
+
     children: [
       {
         type: String,

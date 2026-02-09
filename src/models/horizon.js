@@ -247,7 +247,31 @@ HorizonSchema.statics = {
         }
       }
     });
-    
+
+    // Build edges from inputNodeIds (data agent → custom agent links)
+    nodes.forEach(node => {
+      if (node.inputNodeIds && node.inputNodeIds.length > 0) {
+        node.inputNodeIds.forEach(inputId => {
+          const inputIdStr = String(inputId);
+          const targetIdStr = String(node._id);
+          // Deduplicate: don't create if already exists from parentId
+          const alreadyExists = edges.some(
+            e => e.source === inputIdStr && e.target === targetIdStr
+          );
+          if (!alreadyExists && nodeMap.has(inputIdStr)) {
+            edges.push({
+              id: `edge-${inputIdStr}-${targetIdStr}`,
+              source: inputIdStr,
+              target: targetIdStr,
+              type: 'custom',
+              animated: false,
+              data: { output: null },
+            });
+          }
+        });
+      }
+    });
+
     return edges;
   },
 
