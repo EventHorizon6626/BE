@@ -20,9 +20,32 @@ router.get("/", requireAuth, async (req, res) => {
       isActive: true,
     }).sort({ updatedAt: -1 });
 
+    // Attach nodes to each horizon for preview
+    const horizonIds = horizons.map(h => h._id);
+    const allNodes = await Node.find({
+      horizonId: { $in: horizonIds },
+      isActive: true,
+    }).select('horizonId type position parentId data.agent.type data.agent.color').lean();
+
+    const nodesByHorizon = {};
+    allNodes.forEach(n => {
+      const hid = n.horizonId.toString();
+      if (!nodesByHorizon[hid]) nodesByHorizon[hid] = [];
+      nodesByHorizon[hid].push({
+        id: n._id.toString(),
+        type: n.type,
+        position: n.position,
+        parentId: n.parentId || null,
+        data: { agent: n.data?.agent },
+      });
+    });
+
     res.json({
       success: true,
-      data: horizons.map(h => h.toJSON()),
+      data: horizons.map(h => ({
+        ...h.toJSON(),
+        nodes: nodesByHorizon[h._id.toString()] || [],
+      })),
     });
   } catch (error) {
     console.error("Error fetching horizons:", error);
