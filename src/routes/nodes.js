@@ -16,6 +16,7 @@ router.post("/", requireAuth, async (req, res) => {
       data,
       executionOrder,
       inputNodeIds,
+      childNodes, // For block nodes
     } = req.body;
 
     if (!horizonId || !type) {
@@ -53,6 +54,7 @@ router.post("/", requireAuth, async (req, res) => {
       data: data || {},
       executionOrder: executionOrder || 0,
       inputNodeIds: inputNodeIds || [],
+      childNodes: type === "block" ? (childNodes || []) : undefined,
     });
 
     await node.save();
@@ -106,7 +108,7 @@ router.put("/:id", requireAuth, async (req, res) => {
       });
     }
 
-    const { type, parentId, position, data, executionOrder, selected, inputNodeIds } =
+    const { type, parentId, position, data, executionOrder, selected, inputNodeIds, childNodes } =
       req.body;
 
     if (type !== undefined) node.type = type;
@@ -115,6 +117,11 @@ router.put("/:id", requireAuth, async (req, res) => {
     if (executionOrder !== undefined) node.executionOrder = executionOrder;
     if (selected !== undefined) node.selected = selected;
     if (inputNodeIds !== undefined) node.inputNodeIds = inputNodeIds;
+    
+    // Update childNodes for block type
+    if (childNodes !== undefined && node.type === "block") {
+      node.childNodes = childNodes;
+    }
 
     if (parentId !== undefined && parentId !== node.parentId) {
       if (node.parentId) {
@@ -176,13 +183,48 @@ router.delete("/:id", requireAuth, async (req, res) => {
     const descendantIds = await Node.findDescendants(String(node._id), node.horizonId);
     const nodeIds = [node._id, ...descendantIds];
 
+    // Set all nodes and descendants as inactive
     await Node.updateMany({ _id: { $in: nodeIds } }, { $set: { isActive: false } });
 
+    // Clear parentId of any active nodes that reference this deleted node
+    // This handles cases where nodes might reference this node but weren't in descendants
+    await Node.updateMany(
+      { 
+        horizonId: node.horizonId,
+        parentId: String(node._id),
+        isActive: true 
+      },
+      { $set: { parentId: null, depth: 0 } }
+    );
+
+    // Remove this node from parent's children array
     if (node.parentId) {
       await Node.findByIdAndUpdate(
         node.parentId,
         { $pull: { children: String(node._id) } }
       );
+    }
+
+    // Cleanup orphaned parentIds: find any active nodes whose parentId points to inactive nodes
+    const allActiveNodes = await Node.find({
+      horizonId: node.horizonId,
+      isActive: true,
+      parentId: { $ne: null }
+    });
+
+    for (const activeNode of allActiveNodes) {
+      const parentExists = await Node.findOne({
+        _id: activeNode.parentId,
+        isActive: true
+      });
+
+      if (!parentExists) {
+        // Parent doesn't exist or is inactive, clear the parentId
+        await Node.findByIdAndUpdate(
+          activeNode._id,
+          { $set: { parentId: null, depth: 0 } }
+        );
+      }
     }
 
     horizon.stats.nodeCount = await Node.countDocuments({

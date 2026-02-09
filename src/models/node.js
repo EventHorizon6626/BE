@@ -19,7 +19,7 @@ const NodeSchema = new mongoose.Schema(
     type: {
       type: String,
       required: true,
-      enum: ["agentNode", "portfolioNode", "teamNode", "customNode", "outputNode"],
+      enum: ["agentNode", "portfolioNode", "teamNode", "customNode", "outputNode", "block"],
       default: "agentNode",
     },
 
@@ -37,6 +37,33 @@ const NodeSchema = new mongoose.Schema(
       {
         type: String,
       },
+    ],
+
+    // For block nodes: embedded child nodes that don't have parentId or children
+    childNodes: [
+      {
+        type: {
+          type: String,
+          required: true,
+          enum: ["agentNode", "portfolioNode", "teamNode", "customNode", "outputNode"],
+        },
+        position: {
+          x: { type: Number, required: true, default: 0 },
+          y: { type: Number, required: true, default: 0 },
+        },
+        data: mongoose.Schema.Types.Mixed,
+        executionOrder: {
+          type: Number,
+          default: 0,
+        },
+        inputNodeIds: [{
+          type: String,
+        }],
+        isActive: {
+          type: Boolean,
+          default: true,
+        },
+      }
     ],
 
     depth: {
