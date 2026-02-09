@@ -265,6 +265,12 @@ async function proxyAgentRequest(agentName, req, res) {
       return res.json(normalizedData);
     }
 
+    // Skip saving outputNode if frontend says this agent's output flows via edge (wired to analyzer)
+    if (req.body.skipOutputNode) {
+      console.log(`[AI Proxy] skipOutputNode=true for ${agentName}, skipping outputNode save`);
+      return res.json(normalizedData);
+    }
+
     // Auto-save outputNode to DB
     try {
       const { horizonId, agentNodeId, agentPosition } = req.body;
@@ -379,6 +385,11 @@ aiRouter.post("/agents/technical", requireAuth, (req, res) =>
 // Fundamentals Agent
 aiRouter.post("/agents/fundamentals", requireAuth, (req, res) =>
   proxyAgentRequest("fundamentals", req, res)
+);
+
+// Web Search Agent
+aiRouter.post("/agents/web-search", requireAuth, (req, res) =>
+  proxyAgentRequest("web_search", req, res)
 );
 
 /**
@@ -748,6 +759,12 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
     // Skip saving outputNode if agent needs data (FE will handle the flow)
     if (data.status === 'needs_data') {
       console.log(`[AI Proxy] Custom agent needs data, skipping outputNode save`);
+      return res.json(normalizedData);
+    }
+
+    // Skip saving outputNode if frontend says this agent's output flows via edge (wired to analyzer)
+    if (req.body.skipOutputNode) {
+      console.log(`[AI Proxy] skipOutputNode=true for custom agent, skipping outputNode save`);
       return res.json(normalizedData);
     }
 
