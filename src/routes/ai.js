@@ -389,7 +389,7 @@ aiRouter.post("/agents/fundamentals", requireAuth, (req, res) =>
 
 // Web Search Agent
 aiRouter.post("/agents/web-search", requireAuth, (req, res) =>
-  proxyAgentRequest("web_search", req, res)
+  proxyAgentRequest("web-search", req, res)
 );
 
 /**
