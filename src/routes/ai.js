@@ -223,6 +223,7 @@ async function proxyAgentRequest(agentName, req, res) {
       days,
       indicators,
       data,
+      raw_data,
       // Thinking agent parameters
       input_data,
       system_prompt,
@@ -246,6 +247,7 @@ async function proxyAgentRequest(agentName, req, res) {
       days: days || 7,
       indicators: indicators || ["SMA", "RSI", "MACD"],
       data: data || null, // For System 2 agents
+      raw_data: raw_data || null, // Upstream data for analyzer agents
       // Thinking agent parameters (used by bull-bear-analyzer and thinking agents)
       input_data: input_data || data || null,
       system_prompt: system_prompt || null,
