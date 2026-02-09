@@ -259,13 +259,14 @@ HorizonSchema.statics = {
             e => e.source === inputIdStr && e.target === targetIdStr
           );
           if (!alreadyExists && nodeMap.has(inputIdStr)) {
+            const sourceNode = nodeMap.get(inputIdStr);
             edges.push({
               id: `edge-${inputIdStr}-${targetIdStr}`,
               source: inputIdStr,
               target: targetIdStr,
               type: 'custom',
               animated: false,
-              data: { output: null },
+              data: { output: sourceNode?.data?.output || null },
             });
           }
         });
