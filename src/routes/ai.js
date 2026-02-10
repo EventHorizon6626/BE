@@ -606,7 +606,7 @@ async function analyzeWithEHMultiAgent(stocks, systemPrompt, userPrompt, inputDa
       Accept: "application/json",
     },
     body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(180000), // 180 second timeout (thinking loop needs time)
+    signal: AbortSignal.timeout(240000), // 240 second timeout (thinking loop needs time)
   });
 
   if (!response.ok) {
@@ -950,8 +950,8 @@ aiRouter.post("/agents/think", requireAuth, async (req, res) => {
         max_iterations: max_iterations || 5,
         available_tools: available_tools || ["candlestick", "earnings", "news", "technical", "fundamentals"],
       }),
-      // Longer timeout for thinking agents (up to 3 minutes)
-      signal: AbortSignal.timeout(180000),
+      // Longer timeout for thinking agents (up to 4 minutes)
+      signal: AbortSignal.timeout(240000),
     });
 
     if (!aiResponse.ok) {
