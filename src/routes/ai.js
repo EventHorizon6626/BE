@@ -38,8 +38,8 @@ aiRouter.post("/portfolio/analyze", requireAuth, async (req, res) => {
         portfolio: stocks,
         portfolio_id: `portfolio_${Date.now()}`
       }),
-      // 240 second timeout for AI processing
-      signal: AbortSignal.timeout(240000),
+      // 500 second timeout for AI processing
+      signal: AbortSignal.timeout(500000),
     });
 
     if (!aiResponse.ok) {
@@ -117,7 +117,7 @@ aiRouter.post("/chart", requireAuth, async (req, res) => {
         enabled_agents: ["candlestick"],
         portfolio_id: `chart_${Date.now()}`
       }),
-      signal: AbortSignal.timeout(240000), // 240 second timeout
+      signal: AbortSignal.timeout(500000), // 500 second timeout
     });
 
     if (!aiResponse.ok) {
@@ -438,7 +438,7 @@ async function callEHMultiAgentDataEndpoint(agentName, requestBody) {
       Accept: "application/json",
     },
     body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(240000), // 240 second timeout
+    signal: AbortSignal.timeout(500000), // 500 second timeout
   });
 
   if (!response.ok) {
@@ -471,7 +471,7 @@ async function callEventHorizonAIEndpoint(agentName, requestBody) {
       Accept: "application/json",
     },
     body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(240000),
+    signal: AbortSignal.timeout(500000),
   });
 
   if (!response.ok) {
@@ -609,7 +609,7 @@ async function analyzeWithEHMultiAgent(stocks, systemPrompt, userPrompt, inputDa
       Accept: "application/json",
     },
     body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(240000), // 240 second timeout (thinking loop needs time)
+    signal: AbortSignal.timeout(500000), // 500 second timeout (thinking loop needs time)
   });
 
   if (!response.ok) {
@@ -955,7 +955,7 @@ aiRouter.post("/agents/think", requireAuth, async (req, res) => {
         available_tools: available_tools || ["candlestick", "earnings", "news", "technical", "fundamentals"],
       }),
       // Longer timeout for thinking agents (up to 4 minutes)
-      signal: AbortSignal.timeout(240000),
+      signal: AbortSignal.timeout(500000),
     });
 
     if (!aiResponse.ok) {
