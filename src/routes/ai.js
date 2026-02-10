@@ -582,7 +582,7 @@ async function analyzeWithGoogle(stocks, systemPrompt, userPrompt, earningsData 
  * @param {string} executionMode - Optional execution mode (e.g. 'fetch_data')
  * @returns {Promise<object>} - Response from EH multi-agent endpoint
  */
-async function analyzeWithEHMultiAgent(stocks, systemPrompt, userPrompt, inputData = null, executionMode = null) {
+async function analyzeWithEHMultiAgent(stocks, systemPrompt, userPrompt, inputData = null, executionMode = null, availableTools = null) {
   const EH_MULTI_AGENT_BASE_URL = process.env.EH_MULTI_AGENT_URL || "http://20.74.82.247:8030";
   const customEndpoint = `${EH_MULTI_AGENT_BASE_URL}/agents/custom`;
 
@@ -597,6 +597,9 @@ async function analyzeWithEHMultiAgent(stocks, systemPrompt, userPrompt, inputDa
   };
   if (executionMode) {
     requestBody.execution_mode = executionMode;
+  }
+  if (availableTools) {
+    requestBody.available_tools = availableTools;
   }
 
   const response = await fetch(customEndpoint, {
@@ -712,6 +715,7 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
       agentName,
       input_data, // Optional earnings data from prior agents
       execution_mode, // Optional execution mode (e.g. 'fetch_data' for DATA agents)
+      available_tools, // Optional tool restriction (e.g. ['web_search'] for exotic data agents)
     } = req.body;
 
     if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
@@ -739,7 +743,7 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
       if (provider === "google") {
         data = await analyzeWithGoogle(stocks, system_prompt, user_prompt, input_data);
       } else if (provider === "eh-multi-agent") {
-        data = await analyzeWithEHMultiAgent(stocks, system_prompt, user_prompt, input_data, execution_mode);
+        data = await analyzeWithEHMultiAgent(stocks, system_prompt, user_prompt, input_data, execution_mode, available_tools);
       } else {
         throw new Error(`Unknown AGENT_PROVIDER: ${provider}. Must be "google" or "eh-multi-agent"`);
       }
