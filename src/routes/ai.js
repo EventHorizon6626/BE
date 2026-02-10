@@ -2,11 +2,198 @@
 import express from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { Node } from "../models/node.js";
+import { Job } from "../models/job.js";
 
 export const aiRouter = express.Router();
 
 // AI Service URL (Event-Horizon-AI runs on port 8001)
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:8001";
+
+/**
+ * Process agent job in background
+ * Updates job status and result in database
+ */
+async function processAgentJobInBackground(jobId, agentName, requestBody, userId) {
+  try {
+    console.log(`[Job ${jobId}] Starting background processing for ${agentName}`);
+
+    // Update job status to processing
+    await Job.findByIdAndUpdate(jobId, {
+      status: "processing",
+      "metadata.startedAt": new Date(),
+    });
+
+    // Route to configured provider and get result
+    const startTime = Date.now();
+    const aiData = await routeDataAgentRequest(agentName, requestBody);
+    const duration = Date.now() - startTime;
+
+    // Normalize response
+    const normalizedData = normalizeAgentResponse(agentName, aiData);
+
+    console.log(`[Job ${jobId}] ${agentName} completed in ${duration}ms`);
+
+    // Save outputNode if needed
+    let outputNodeInfo = null;
+    const { horizonId, agentNodeId, agentPosition, skipOutputNode } = requestBody;
+
+    if (horizonId && agentNodeId && !skipOutputNode && aiData.status !== 'needs_data') {
+      try {
+        const outputNode = new Node({
+          userId,
+          parentId: agentNodeId,
+          horizonId,
+          type: "outputNode",
+          position: agentPosition ? {
+            x: agentPosition.x + 350,
+            y: agentPosition.y
+          } : { x: 0, y: 0 },
+          data: {
+            result: normalizedData,
+            agentName: agentName,
+            timestamp: new Date().toISOString(),
+            metadata: {
+              agentType: agentName,
+              symbols: requestBody.stocks,
+              period: requestBody.period || "30d",
+              timeframe: requestBody.timeframe || "1d",
+              provider: aiData._provider || 'unknown',
+            },
+          },
+        });
+
+        const outputNodeDoc = await outputNode.save();
+
+        // Deactivate old output nodes
+        const alloutputNodesOfCurrentAgent = await Node.find({
+          horizonId,
+          parentId: agentNodeId,
+          type: "outputNode",
+          isActive: true,
+        });
+        const oldOutputNodes = alloutputNodesOfCurrentAgent.filter(node => node._id.toString() !== outputNodeDoc._id.toString());
+        if (oldOutputNodes.length > 0) {
+          const oldOutputNodeIds = oldOutputNodes.map(node => node._id);
+          await Node.updateMany(
+            { _id: { $in: oldOutputNodeIds } },
+            { $set: { isActive: false } }
+          );
+        }
+
+        // Update agent node children
+        const agentNode = await Node.findById({ _id: agentNodeId});
+        agentNode.children = [String(outputNodeDoc._id)];
+        await agentNode.save();
+
+        outputNodeInfo = {
+          id: String(outputNodeDoc._id),
+          createdAt: outputNodeDoc.createdAt,
+        };
+
+        console.log(`[Job ${jobId}] Saved outputNode: ${outputNodeDoc._id}`);
+      } catch (saveError) {
+        console.error(`[Job ${jobId}] Failed to save outputNode:`, saveError);
+      }
+    }
+
+    // Update job as completed
+    await Job.findByIdAndUpdate(jobId, {
+      status: "completed",
+      progress: 100,
+      result: {
+        ...normalizedData,
+        _outputNode: outputNodeInfo,
+      },
+      "metadata.completedAt": new Date(),
+      "metadata.duration": duration,
+      "metadata.provider": aiData._provider || 'unknown',
+    });
+
+    console.log(`[Job ${jobId}] Job completed successfully`);
+
+  } catch (error) {
+    console.error(`[Job ${jobId}] Job failed:`, error);
+
+    // Update job as failed
+    await Job.findByIdAndUpdate(jobId, {
+      status: "failed",
+      error: {
+        message: error.message,
+        stack: error.stack,
+        code: error.code || error.name,
+      },
+      "metadata.completedAt": new Date(),
+    });
+  }
+}
+
+/**
+ * Generic async job-based agent proxy handler
+ * Creates a job and processes it in background
+ * @param {string} agentName - Agent type
+ * @param {object} req - Express request
+ * @param {object} res - Express response
+ */
+async function proxyAgentRequestAsJob(agentName, req, res) {
+  try {
+    const userId = req.auth.userId;
+    const { stocks } = req.body;
+
+    // Validate request
+    if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
+      return res.status(400).json({
+        error: "Invalid request",
+        message: "stocks array is required and must not be empty",
+      });
+    }
+
+    console.log(`[AI Proxy] Creating job for ${agentName} with ${stocks.length} stocks`);
+    console.log(`[AI Proxy] Request body:`, {
+      horizonId: req.body.horizonId,
+      agentNodeId: req.body.agentNodeId,
+      agentPosition: req.body.agentPosition,
+    });
+
+    // Create job in database
+    const job = new Job({
+      userId,
+      horizonId: req.body.horizonId || null,
+      agentNodeId: req.body.agentNodeId || null,
+      agentType: agentName,
+      status: "pending",
+      progress: 0,
+      requestData: req.body,
+      metadata: {
+        provider: process.env.AGENT_PROVIDER || "eh-multi-agent",
+      },
+    });
+
+    const savedJob = await job.save();
+    const jobId = savedJob._id.toString();
+
+    console.log(`[AI Proxy] Job created: ${jobId} for ${agentName}`);
+
+    // Start background processing (don't await)
+    processAgentJobInBackground(jobId, agentName, req.body, userId)
+      .catch(error => {
+        console.error(`[Job ${jobId}] Background processing error:`, error);
+      });
+
+    // Return job ID immediately
+    return res.status(202).json({
+      jobId,
+      status: "pending",
+      message: `Job created successfully for ${agentName}. Use GET /api/jobs/:jobId to check status.`,
+    });
+
+  } catch (error) {
+    console.error(`[AI Proxy] ${agentName} job creation error:`, error);
+    return res.status(500).json({
+      error: "Internal server error",
+      message: error.message || `Failed to create job for ${agentName}`,
+    });
+  }
+}
 
 /**
  * Proxy endpoint for portfolio analysis
@@ -431,30 +618,46 @@ async function callEHMultiAgentDataEndpoint(agentName, requestBody) {
 
   console.log(`[EH-Multi-Agent] Calling ${endpoint}`);
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(500000), // 500 second timeout
-  });
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(500000), // 500 second timeout
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`[EH-Multi-Agent] Error ${response.status}:`, errorText);
-    throw new Error(`EH Multi-Agent ${agentName} error: ${response.status} - ${errorText}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[EH-Multi-Agent] Error ${response.status}:`, errorText);
+      
+      // If 404 or 405, agent not supported - fallback to Event-Horizon-AI
+      if (response.status === 404 || response.status === 405) {
+        console.warn(`[EH-Multi-Agent] Agent ${agentName} not supported (${response.status}), falling back to event-horizon-ai`);
+        return await callEventHorizonAIEndpoint(agentName, requestBody);
+      }
+      
+      throw new Error(`EH Multi-Agent ${agentName} error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log(`[EH-Multi-Agent] ${agentName} call successful`);
+
+    // Add provider metadata
+    return {
+      ...data,
+      _provider: "eh-multi-agent",
+    };
+  } catch (error) {
+    // If network error or timeout, try fallback
+    if (error.name === 'TypeError' || error.name === 'AbortError') {
+      console.warn(`[EH-Multi-Agent] Network error for ${agentName}, falling back to event-horizon-ai:`, error.message);
+      return await callEventHorizonAIEndpoint(agentName, requestBody);
+    }
+    throw error;
   }
-
-  const data = await response.json();
-  console.log(`[EH-Multi-Agent] ${agentName} call successful`);
-
-  // Add provider metadata
-  return {
-    ...data,
-    _provider: "eh-multi-agent",
-  };
 }
 
 /**
@@ -860,59 +1063,60 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
 // ===== System 2: Team 1 Analyst Agents =====
 
 aiRouter.post("/agents/fundamentals-analyst", requireAuth, (req, res) =>
-  proxyAgentRequest("fundamentals-analyst", req, res)
+  proxyAgentRequestAsJob("fundamentals-analyst", req, res)
 );
 
 aiRouter.post("/agents/sentiment-analyst", requireAuth, (req, res) =>
-  proxyAgentRequest("sentiment-analyst", req, res)
+  proxyAgentRequestAsJob("sentiment-analyst", req, res)
 );
 
 aiRouter.post("/agents/news-analyst", requireAuth, (req, res) =>
-  proxyAgentRequest("news-analyst", req, res)
+  proxyAgentRequestAsJob("news-analyst", req, res)
 );
 
 aiRouter.post("/agents/technical-analyst", requireAuth, (req, res) =>
-  proxyAgentRequest("technical-analyst", req, res)
+  proxyAgentRequestAsJob("technical-analyst", req, res)
 );
 
 // ===== System 2: Team 2 Researcher Agents =====
 
 aiRouter.post("/agents/bull-researcher", requireAuth, (req, res) =>
-  proxyAgentRequest("bull-researcher", req, res)
+  proxyAgentRequestAsJob("bull-researcher", req, res)
 );
 
 aiRouter.post("/agents/bear-researcher", requireAuth, (req, res) =>
-  proxyAgentRequest("bear-researcher", req, res)
+  proxyAgentRequestAsJob("bear-researcher", req, res)
 );
 
 aiRouter.post("/agents/research-manager", requireAuth, (req, res) =>
-  proxyAgentRequest("research-manager", req, res)
+  proxyAgentRequestAsJob("research-manager", req, res)
 );
 
-// Bull-Bear Analyzer - Standalone thinking agent for bull/bear debate
+// Bull-Bear Analyzer - Async job-based endpoint
 aiRouter.post("/agents/bull-bear-analyzer", requireAuth, (req, res) =>
-  proxyAgentRequest("bull-bear-analyzer", req, res)
+  proxyAgentRequestAsJob("bull-bear-analyzer", req, res)
 );
 
 // Bull-Bear Analyzer (backward compatibility with underscore naming)
-aiRouter.post("/agents/bull_bear_analyzer", requireAuth, (req, res) =>
-  proxyAgentRequest("bull-bear-analyzer", req, res)
-);
+aiRouter.post("/agents/bull_bear_analyzer", requireAuth, async (req, res) => {
+  // Forward to dash-separated endpoint
+  return proxyAgentRequestAsJob("bull-bear-analyzer", req, res);
+});
 
 // ===== System 2: Team 3 Portfolio =====
 
 aiRouter.post("/agents/portfolio-manager", requireAuth, (req, res) =>
-  proxyAgentRequest("portfolio-manager", req, res)
+  proxyAgentRequestAsJob("portfolio-manager", req, res)
 );
 
 // ===== System 2: Team 4 Risk & Execution =====
 
 aiRouter.post("/agents/risk-manager", requireAuth, (req, res) =>
-  proxyAgentRequest("risk-manager", req, res)
+  proxyAgentRequestAsJob("risk-manager", req, res)
 );
 
 aiRouter.post("/agents/trader", requireAuth, (req, res) =>
-  proxyAgentRequest("trader", req, res)
+  proxyAgentRequestAsJob("trader", req, res)
 );
 
 // ===== Thinking Agent Endpoint =====
