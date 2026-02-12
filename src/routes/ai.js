@@ -9,6 +9,156 @@ export const aiRouter = express.Router();
 // AI Service URL (Event-Horizon-AI runs on port 8001)
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:8001";
 
+// Standard agent details (matching FE)
+const STANDARD_AGENT_DETAILS = {
+  candlestick: { name: 'Candlestick', color: 'blue', description: 'OHLCV price data — open, high, low, close, volume for each trading day' },
+  earnings: { name: 'Earnings', color: 'green', description: 'Financial reports, quarterly earnings, EPS history, revenue data' },
+  news: { name: 'News', color: 'orange', description: 'Recent news articles, headlines, and press releases' },
+  technical: { name: 'Technical', color: 'purple', description: 'Technical indicators — SMA, RSI, MACD, Bollinger Bands' },
+  fundamentals: { name: 'Fundamentals', color: 'teal', description: 'Fundamental metrics — P/E ratio, EPS, dividend yield, market cap' },
+  web_search: { name: 'Web Search', color: 'cyan', description: 'Web search for sentiment, analyst ratings, industry context' },
+};
+
+/**
+ * Find connected portfolio node by traversing edges backward
+ */
+async function findConnectedPortfolio(agentNodeId, horizonId) {
+  const agentNode = await Node.findById(agentNodeId);
+  if (!agentNode) return null;
+
+  // If agentNode has parentId and it's a portfolio, return it
+  if (agentNode.parentId) {
+    const parentNode = await Node.findById(agentNode.parentId);
+    if (parentNode && parentNode.type === 'portfolioNode') {
+      return parentNode;
+    }
+  }
+
+  // Otherwise, search all nodes in horizon to find incoming edges
+  const allNodes = await Node.find({ horizonId, isActive: true });
+  
+  const visited = new Set();
+  const findUpstream = (nodeId) => {
+    if (visited.has(nodeId)) return null;
+    visited.add(nodeId);
+    
+    // Find nodes that have this node as inputNode or child
+    for (const node of allNodes) {
+      if (node.inputNodeIds?.includes(nodeId) || node.children?.includes(nodeId)) {
+        if (node.type === 'portfolioNode') return node;
+        const upstream = findUpstream(String(node._id));
+        if (upstream) return upstream;
+      }
+    }
+    return null;
+  };
+
+  return findUpstream(String(agentNodeId));
+}
+
+/**
+ * Calculate position for data agent nodes between portfolio and analyzer
+ */
+function calculateDataAgentPosition(analyzerNode, portfolioNode, index, total) {
+  const midX = (portfolioNode.position.x + analyzerNode.position.x) / 2;
+  const spreadY = 120; // vertical spacing between data agents
+  const totalHeight = (total - 1) * spreadY;
+  const startY = analyzerNode.position.y - totalHeight / 2;
+  
+  return {
+    x: midX,
+    y: startY + index * spreadY,
+  };
+}
+
+/**
+ * Create data agent nodes when analyzer needs data
+ */
+async function createDataAgentNodes({
+  userId,
+  horizonId,
+  analyzerNodeId,
+  portfolioNodeId,
+  requiredAgents,
+}) {
+  console.log(`[createDataAgentNodes] Creating ${requiredAgents.length} data agent nodes`);
+  
+  const analyzerNode = await Node.findById(analyzerNodeId);
+  const portfolioNode = await Node.findById(portfolioNodeId);
+  
+  if (!analyzerNode || !portfolioNode) {
+    throw new Error('Analyzer or portfolio node not found');
+  }
+
+  const createdNodes = [];
+  const dataAgentNodeIds = [];
+
+  for (let i = 0; i < requiredAgents.length; i++) {
+    const agentSpec = requiredAgents[i];
+    const position = calculateDataAgentPosition(analyzerNode, portfolioNode, i, requiredAgents.length);
+
+    // Standard EH pipeline agents use their tool name as type
+    // Custom/exotic agents use 'custom_agent' type
+    const isStandard = agentSpec.source === 'eh_pipeline';
+    const details = isStandard ? STANDARD_AGENT_DETAILS[agentSpec.name] : null;
+    const agentType = isStandard ? agentSpec.name : 'custom_agent';
+
+    const agentData = {
+      name: details?.name || agentSpec.name,
+      type: agentType,
+      system: 'data',
+      description: details?.description || agentSpec.description || `Data agent: ${agentSpec.name}`,
+      color: details?.color || (isStandard ? 'blue' : 'purple'),
+      isAutoCreated: true,
+      isBuiltin: isStandard,
+    };
+
+    // Standard built-in agents: DON'T set systemPrompt
+    if (isStandard && details) {
+      agentData.description = `Built-in ${details.name} pipeline — ${details.description.toLowerCase()}`;
+    }
+
+    // Exotic agents: use the LLM-generated system prompt from EH
+    if (agentSpec.system_prompt) {
+      agentData.systemPrompt = agentSpec.system_prompt;
+    }
+
+    // Create node in DB
+    const dataAgentNode = new Node({
+      userId,
+      horizonId,
+      type: 'agentNode',
+      position,
+      data: { agent: agentData },
+      parentId: portfolioNodeId, // Wire to portfolio
+      inputNodeIds: [], // Will be updated later if needed
+    });
+
+    await dataAgentNode.save();
+    createdNodes.push(dataAgentNode);
+    dataAgentNodeIds.push(String(dataAgentNode._id));
+
+    console.log(`[createDataAgentNodes] Created data agent: ${agentSpec.name} (${dataAgentNode._id})`);
+  }
+
+  // Update analyzer node to wire data agents
+  analyzerNode.inputNodeIds = dataAgentNodeIds;
+  analyzerNode.parentId = null; // Remove direct portfolio→analyzer link
+  await analyzerNode.save();
+
+  console.log(`[createDataAgentNodes] Updated analyzer ${analyzerNodeId} with inputNodeIds:`, dataAgentNodeIds);
+
+  return {
+    createdNodes: createdNodes.map(n => ({
+      id: String(n._id),
+      type: n.type,
+      position: n.position,
+      agentName: n.data.agent.name,
+    })),
+    dataAgentNodeIds,
+  };
+}
+
 /**
  * Process agent job in background
  * Updates job status and result in database
@@ -33,9 +183,47 @@ async function processAgentJobInBackground(jobId, agentName, requestBody, userId
 
     console.log(`[Job ${jobId}] ${agentName} completed in ${duration}ms`);
 
-    // Save outputNode if needed
-    let outputNodeInfo = null;
+    // Handle needs_data: create data agent nodes
+    let createdDataAgents = null;
     const { horizonId, agentNodeId, agentPosition, skipOutputNode } = requestBody;
+    
+    if (aiData.status === 'needs_data' && aiData.required_agents && aiData.required_agents.length > 0) {
+      console.log(`[Job ${jobId}] Agent needs data, creating ${aiData.required_agents.length} data agent nodes`);
+      
+      try {
+        if (horizonId && agentNodeId) {
+          // Find connected portfolio node
+          const portfolioNode = await findConnectedPortfolio(agentNodeId, horizonId);
+          
+          if (portfolioNode) {
+            const stocks = portfolioNode.data?.portfolio?.stocks || [];
+            
+            if (stocks.length > 0) {
+              // Create data agent nodes
+              const result = await createDataAgentNodes({
+                userId,
+                horizonId,
+                analyzerNodeId: agentNodeId,
+                portfolioNodeId: String(portfolioNode._id),
+                requiredAgents: aiData.required_agents,
+              });
+
+              createdDataAgents = result.createdNodes;
+              console.log(`[Job ${jobId}] Created ${result.createdNodes.length} data agent nodes`);
+            } else {
+              console.warn(`[Job ${jobId}] Cannot create data agents: portfolio has no stocks`);
+            }
+          } else {
+            console.warn(`[Job ${jobId}] Cannot create data agents: no portfolio node found`);
+          }
+        }
+      } catch (createError) {
+        console.error(`[Job ${jobId}] Failed to create data agent nodes:`, createError);
+      }
+    }
+
+    // Save outputNode if needed (skip for needs_data)
+    let outputNodeInfo = null;
 
     if (horizonId && agentNodeId && !skipOutputNode && aiData.status !== 'needs_data') {
       try {
@@ -103,6 +291,10 @@ async function processAgentJobInBackground(jobId, agentName, requestBody, userId
       result: {
         ...normalizedData,
         _outputNode: outputNodeInfo,
+        _createdDataAgents: createdDataAgents,
+        ...(createdDataAgents && {
+          message: `Created ${createdDataAgents.length} data agent(s) — run them and re-run this agent`,
+        }),
       },
       "metadata.completedAt": new Date(),
       "metadata.duration": duration,
@@ -448,10 +640,61 @@ async function proxyAgentRequest(agentName, req, res) {
     console.log(`[AI Proxy] ${agentName} agent completed (provider: ${Aidata._provider || 'unknown'})`);
     console.log(`[AI Proxy] Response structure:`, Object.keys(normalizedData));
 
-    // Skip saving outputNode if agent needs data (FE will handle the flow)
-    if (Aidata.status === 'needs_data') {
-      console.log(`[AI Proxy] ${agentName} agent needs data, skipping outputNode save`);
-      return res.json(normalizedData);
+    // Handle needs_data: create data agent nodes in BE
+    if (Aidata.status === 'needs_data' && Aidata.required_agents && Aidata.required_agents.length > 0) {
+      console.log(`[AI Proxy] ${agentName} agent needs data, creating ${Aidata.required_agents.length} data agent nodes`);
+      
+      try {
+        const { horizonId, agentNodeId } = req.body;
+        
+        if (!horizonId || !agentNodeId) {
+          console.warn(`[AI Proxy] Cannot create data agents: missing horizonId or agentNodeId`);
+          return res.json(normalizedData);
+        }
+
+        // Find connected portfolio node
+        const portfolioNode = await findConnectedPortfolio(agentNodeId, horizonId);
+        
+        if (!portfolioNode) {
+          console.warn(`[AI Proxy] Cannot create data agents: no portfolio node found`);
+          return res.json({
+            ...normalizedData,
+            error: 'No portfolio node connected. Please connect a portfolio to this agent.',
+          });
+        }
+
+        const stocks = portfolioNode.data?.portfolio?.stocks || [];
+        if (stocks.length === 0) {
+          console.warn(`[AI Proxy] Cannot create data agents: portfolio has no stocks`);
+          return res.json({
+            ...normalizedData,
+            error: 'Connected portfolio has no stocks. Please add stocks to the portfolio.',
+          });
+        }
+
+        // Create data agent nodes
+        const result = await createDataAgentNodes({
+          userId: req.auth.userId,
+          horizonId,
+          analyzerNodeId: agentNodeId,
+          portfolioNodeId: String(portfolioNode._id),
+          requiredAgents: Aidata.required_agents,
+        });
+
+        console.log(`[AI Proxy] Created ${result.createdNodes.length} data agent nodes for ${agentName}`);
+
+        return res.json({
+          ...normalizedData,
+          _createdDataAgents: result.createdNodes,
+          message: `Created ${result.createdNodes.length} data agent(s) — run them and re-run this agent`,
+        });
+      } catch (createError) {
+        console.error(`[AI Proxy] Failed to create data agent nodes:`, createError);
+        return res.json({
+          ...normalizedData,
+          error: `Failed to create data agents: ${createError.message}`,
+        });
+      }
     }
 
     // Skip saving outputNode if frontend says this agent's output flows via edge (wired to analyzer)
@@ -964,11 +1207,59 @@ aiRouter.post("/agents/custom", requireAuth, async (req, res) => {
     const normalizedData = normalizeAgentResponse("custom", data);
 
     console.log(`[AI Proxy] Custom agent completed (provider: ${provider}, status: ${data.status || 'success'})`);
+    // Handle needs_data: create data agent nodes in BE
+    if (data.status === 'needs_data' && data.required_agents && data.required_agents.length > 0) {
+      console.log(`[AI Proxy] Agent needs data, creating ${data.required_agents.length} data agent nodes`);
+      
+      try {
+        if (!horizonId || !agentNodeId) {
+          console.warn('[AI Proxy] Cannot create data agents: missing horizonId or agentNodeId');
+          return res.json(normalizedData);
+        }
 
-    // Skip saving outputNode if agent needs data (FE will handle the flow)
-    if (data.status === 'needs_data') {
-      console.log(`[AI Proxy] Custom agent needs data, skipping outputNode save`);
-      return res.json(normalizedData);
+        // Find connected portfolio node
+        const portfolioNode = await findConnectedPortfolio(agentNodeId, horizonId);
+        
+        if (!portfolioNode) {
+          console.warn('[AI Proxy] Cannot create data agents: no portfolio node found');
+          return res.json({
+            ...normalizedData,
+            error: 'No portfolio node connected. Please connect a portfolio to this agent.',
+          });
+        }
+
+        const stocks = portfolioNode.data?.portfolio?.stocks || [];
+        if (stocks.length === 0) {
+          console.warn('[AI Proxy] Cannot create data agents: portfolio has no stocks');
+          return res.json({
+            ...normalizedData,
+            error: 'Connected portfolio has no stocks. Please add stocks to the portfolio.',
+          });
+        }
+
+        // Create data agent nodes
+        const result = await createDataAgentNodes({
+          userId: req.auth.userId,
+          horizonId,
+          analyzerNodeId: agentNodeId,
+          portfolioNodeId: String(portfolioNode._id),
+          requiredAgents: data.required_agents,
+        });
+
+        console.log(`[AI Proxy] Created ${result.createdNodes.length} data agent nodes for ${agentName || 'custom agent'}`);
+
+        return res.json({
+          ...normalizedData,
+          _createdDataAgents: result.createdNodes,
+          message: `Created ${result.createdNodes.length} data agent(s) — please run them and re-run this agent`,
+        });
+      } catch (createError) {
+        console.error('[AI Proxy] Failed to create data agent nodes:', createError);
+        return res.json({
+          ...normalizedData,
+          error: `Failed to create data agents: ${createError.message}`,
+        });
+      }
     }
 
     // Skip saving outputNode if frontend says this agent's output flows via edge (wired to analyzer)
